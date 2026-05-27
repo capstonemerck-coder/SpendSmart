@@ -1,0 +1,94 @@
+version: "3.9"
+
+# ── SpendSmart local development stack ────────────────────────────────────────
+# Run: docker compose up --build
+# Frontend: http://localhost:5173
+# Backend:  http://localhost:8000
+# API docs: http://localhost:8000/docs
+# PgAdmin:  http://localhost:5050
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: spendsmart-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spendsmart
+      POSTGRES_PASSWORD: spendsmart
+      POSTGRES_DB: spendsmart
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spendsmart -d spendsmart"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: spendsmart-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://spendsmart:spendsmart@postgres:5432/spendsmart
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-prod}
+      APP_ENV: ${APP_ENV:-development}
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000","http://frontend"]'
+    volumes:
+      - ./backend/app:/app/app:ro          # hot-reload in dev
+      - upload_data:/app/uploads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --log-level info
+
+  # ── React Frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: spendsmart-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+  # ── PgAdmin (optional dev tool) ────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: spendsmart-pgadmin
+    restart: unless-stopped
+    profiles: ["tools"]   # only starts with: docker compose --profile tools up
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@spendsmart.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+    driver: local
+  upload_data:
+    driver: local

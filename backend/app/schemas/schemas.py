@@ -1,0 +1,311 @@
+"""
+Pydantic v2 schemas for request/response validation.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user_id: int
+    username: str
+    role: str
+    permissions: List[str]
+
+
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=2, max_length=100)
+    password: str = Field(..., min_length=6)
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    region: Optional[str] = None
+    role: str = Field(default="data scientist")
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        allowed = {"admin", "data scientist", "brand intelligence analyst", "leadership"}
+        if v not in allowed:
+            raise ValueError(f"Role must be one of: {allowed}")
+        return v
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    region: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    permissions: Optional[List[str]] = None
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: int
+    username: str
+    full_name: Optional[str]
+    email: Optional[str]
+    region: Optional[str]
+    role: str
+    is_active: bool
+    created_at: datetime
+
+
+# ── Metadata ──────────────────────────────────────────────────────────────────
+
+class MetaDataOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    metadata_id: int
+    region: Optional[str]
+    market: Optional[str]
+    currency: Optional[str]
+    therapeutic_area: Optional[str]
+    brand: Optional[str]
+    indication: Optional[str]
+
+
+# ── Cycle ─────────────────────────────────────────────────────────────────────
+
+class CycleCreate(BaseModel):
+    cycle_id: str = Field(..., min_length=1, max_length=50)
+    metadata_id: Optional[int] = None
+    target_variable: Optional[str] = None
+    time_granularity: Optional[str] = None
+    cycle_start_date: Optional[date] = None
+    cycle_end_date: Optional[date] = None
+
+
+class CycleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    cycle_id: str
+    metadata_id: Optional[int]
+    target_variable: Optional[str]
+    time_granularity: Optional[str]
+    cycle_start_date: Optional[date]
+    cycle_end_date: Optional[date]
+    created_at: datetime
+
+
+# ── Upload ────────────────────────────────────────────────────────────────────
+
+class ValidationError(BaseModel):
+    """Single validation error detail."""
+    field: str
+    message: str
+    row: Optional[int] = None
+
+
+class UploadResponse(BaseModel):
+    upload_id: int
+    cycle_id: Optional[str]
+    is_datafile: bool
+    filename: str
+    row_count: int
+    status: str
+    errors: List[ValidationError] = []
+    warnings: List[str] = []
+    message: str
+
+
+class UploadOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    upload_id: int
+    cycle_id: Optional[str]
+    is_datafile: bool
+    filename: Optional[str]
+    file_size_bytes: Optional[int]
+    row_count: Optional[int]
+    status: str
+    error_message: Optional[str]
+    uploaded_at: datetime
+
+
+# ── Channel Hierarchy ─────────────────────────────────────────────────────────
+
+class ChannelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    channel_id: int
+    channel_name: str
+    parent_id: Optional[int]
+    depth: int
+    children: List["ChannelOut"] = []
+
+
+# ── Model Channel Calculations ────────────────────────────────────────────────
+
+class ModelChannelCalcOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    cycle_id: str
+    channel_id: int
+    channel_name: Optional[str] = None
+    total_sales: Optional[float]
+    total_spend: Optional[float]
+    impactable_sales: Optional[float]
+    roi: Optional[float]
+
+
+class ModelSummaryOut(BaseModel):
+    """Aggregated model summary for the Model Insights screen."""
+    cycle_id: str
+    total_sales: float
+    total_spend: float
+    overall_roi: float
+    base_sales: float
+    incremental_sales: float
+    base_pct: float
+    incremental_pct: float
+    channel_calculations: List[ModelChannelCalcOut]
+
+
+# ── Scenarios ─────────────────────────────────────────────────────────────────
+
+class ConstraintIn(BaseModel):
+    channel_id: int
+    min_spend_pct: float = Field(default=0, ge=-100, le=0)
+    max_spend_pct: float = Field(default=0, ge=0, le=100)
+
+
+class ScenarioCreate(BaseModel):
+    scenario_name: str = Field(..., min_length=1, max_length=300)
+    cycle_id: Optional[str] = None
+    scenario_type: str = Field(default="Spend Based")
+    is_public: bool = True
+    category_constraint: Optional[str] = None
+    target_spend: Optional[float] = None
+    target_kpi: Optional[str] = None
+    target_value: Optional[float] = None
+    constraints: List[ConstraintIn] = []
+
+    @field_validator("scenario_type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        if v not in {"Spend Based", "Goal Based"}:
+            raise ValueError("scenario_type must be 'Spend Based' or 'Goal Based'")
+        return v
+
+
+class ScenarioUpdate(BaseModel):
+    scenario_name: Optional[str] = None
+    is_public: Optional[bool] = None
+    category_constraint: Optional[str] = None
+    target_spend: Optional[float] = None
+    target_kpi: Optional[str] = None
+    target_value: Optional[float] = None
+    constraints: Optional[List[ConstraintIn]] = None
+
+
+class ConstraintOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    channel_id: int
+    min_spend_pct: Optional[float]
+    max_spend_pct: Optional[float]
+    channel_name: Optional[str] = None
+    current_roi: Optional[float] = None
+    current_spend: Optional[float] = None
+
+
+class ScenarioOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scenario_id: int
+    scenario_name: str
+    cycle_id: Optional[str]
+    created_by: Optional[int]
+    scenario_type: str
+    is_public: bool
+    target_spend: Optional[float]
+    target_kpi: Optional[str]
+    target_value: Optional[float]
+    is_pending: bool
+    category_constraint: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    constraints: List[ConstraintOut] = []
+
+
+# ── Optimizer Results ─────────────────────────────────────────────────────────
+
+class OptimizerRunRequest(BaseModel):
+    scenario_id: int
+
+
+class ChannelResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    channel_id: int
+    channel_name: Optional[str] = None
+    optimized_spend: Optional[float]
+    impactable_sales: Optional[float]
+    roi: Optional[float]
+    mroi: Optional[float]
+
+
+class ScenarioOutcomeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scenario_id: int
+    scenario_name: Optional[str] = None
+    scenario_type: Optional[str] = None
+    total_sales: Optional[float]
+    total_spend: Optional[float]
+    impactable_sales: Optional[float]
+    roi: Optional[float]
+    mroi: Optional[float]
+    channel_results: List[ChannelResultOut] = []
+
+
+# ── DataHistory ───────────────────────────────────────────────────────────────
+
+class DataFactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    cycle_id: str
+    date: Optional[date]
+    category: Optional[str]
+    channel: Optional[str]
+    sub_channel: Optional[str]
+    variable: Optional[str]
+    spend: Optional[float]
+    reach: Optional[float]
+    value: Optional[float]
+
+
+class PaginatedResponse(BaseModel):
+    """Generic paginated response wrapper."""
+    total: int
+    page: int
+    page_size: int
+    items: List[Any]
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+class DashboardKPIs(BaseModel):
+    total_sales: float
+    total_spend: float
+    overall_roi: float
+    scenario_count: int
+    upload_count: int
+    active_cycle_id: Optional[str]

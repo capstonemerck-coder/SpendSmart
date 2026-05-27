@@ -1,0 +1,158 @@
+# ── SpendSmart Azure Pipelines CI/CD ─────────────────────────────────────────
+# Triggers: main branch push or PR
+# Stages: Test → Build → Deploy (staging) → Approve → Deploy (production)
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+  ACR_NAME: "spendsmartacr"
+  BACKEND_IMAGE: "$(ACR_NAME).azurecr.io/spendsmart-backend"
+  FRONTEND_IMAGE: "$(ACR_NAME).azurecr.io/spendsmart-frontend"
+  APP_ENV: "staging"
+
+stages:
+
+  # ── Stage 1: Backend Tests ─────────────────────────────────────────────────
+  - stage: BackendTest
+    displayName: "Backend — Lint & Test"
+    jobs:
+      - job: PythonTests
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+
+          - script: |
+              cd backend
+              pip install -r requirements.txt
+              pip install ruff pytest pytest-cov
+            displayName: "Install dependencies"
+
+          - script: |
+              cd backend
+              ruff check app/ --output-format=github
+            displayName: "Lint (ruff)"
+
+          - script: |
+              cd backend
+              pytest tests/ --cov=app --cov-report=xml --cov-report=term -q
+            displayName: "Run pytest"
+            env:
+              DATABASE_URL: "sqlite+aiosqlite:///./test.db"
+              SECRET_KEY: "test-secret-key"
+              APP_ENV: "test"
+
+          - task: PublishCodeCoverageResults@1
+            inputs:
+              codeCoverageTool: Cobertura
+              summaryFileLocation: "backend/coverage.xml"
+
+  # ── Stage 2: Frontend Build ────────────────────────────────────────────────
+  - stage: FrontendBuild
+    displayName: "Frontend — Build"
+    dependsOn: []
+    jobs:
+      - job: NodeBuild
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(NODE_VERSION)
+
+          - script: |
+              cd frontend
+              npm ci
+              npm run build
+            displayName: "npm build"
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: "frontend/dist"
+              ArtifactName: "frontend-dist"
+
+  # ── Stage 3: Docker Build & Push ──────────────────────────────────────────
+  - stage: DockerPush
+    displayName: "Docker — Build & Push to ACR"
+    dependsOn:
+      - BackendTest
+      - FrontendBuild
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - job: BuildAndPush
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: AzureCLI@2
+            displayName: "Login to ACR"
+            inputs:
+              azureSubscription: "SpendSmart-ServiceConnection"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az acr login --name $(ACR_NAME)
+
+          - script: |
+              docker build -t $(BACKEND_IMAGE):$(Build.BuildId) \
+                           -t $(BACKEND_IMAGE):latest \
+                           ./backend
+              docker push $(BACKEND_IMAGE):$(Build.BuildId)
+              docker push $(BACKEND_IMAGE):latest
+            displayName: "Build & push backend image"
+
+          - script: |
+              docker build -t $(FRONTEND_IMAGE):$(Build.BuildId) \
+                           -t $(FRONTEND_IMAGE):latest \
+                           ./frontend
+              docker push $(FRONTEND_IMAGE):$(Build.BuildId)
+              docker push $(FRONTEND_IMAGE):latest
+            displayName: "Build & push frontend image"
+
+  # ── Stage 4: Deploy to Staging ─────────────────────────────────────────────
+  - stage: DeployStaging
+    displayName: "Deploy → Staging"
+    dependsOn: DockerPush
+    jobs:
+      - deployment: StagingDeploy
+        environment: "spendsmart-staging"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebAppContainer@1
+                  displayName: "Deploy backend to App Service (staging)"
+                  inputs:
+                    azureSubscription: "SpendSmart-ServiceConnection"
+                    appName: "spendsmart-backend-staging"
+                    containers: "$(BACKEND_IMAGE):$(Build.BuildId)"
+
+  # ── Stage 5: Deploy to Production (manual approval) ───────────────────────
+  - stage: DeployProduction
+    displayName: "Deploy → Production"
+    dependsOn: DeployStaging
+    jobs:
+      - deployment: ProdDeploy
+        environment: "spendsmart-production"   # requires approval gate in Azure DevOps
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebAppContainer@1
+                  displayName: "Deploy backend to App Service (production)"
+                  inputs:
+                    azureSubscription: "SpendSmart-ServiceConnection"
+                    appName: "spendsmart-backend-prod"
+                    containers: "$(BACKEND_IMAGE):$(Build.BuildId)"
