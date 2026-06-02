@@ -61,7 +61,7 @@ export function NavBar({ activeTab, onTabChange }: NavBarProps) {
   const visibleScreenTabs = SCREEN_TABS.filter((s) => hasPermission(s));
   const visibleTabs: Tab[] = isAdmin ? [] : ['HOME', ...visibleScreenTabs];
 
-  const initials = currentUser.fullName
+  const initials = (currentUser.full_name ?? currentUser.username)
     .split(' ')
     .map((p) => p[0])
     .slice(0, 2)
@@ -145,7 +145,7 @@ export function NavBar({ activeTab, onTabChange }: NavBarProps) {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-[13.5px] font-semibold text-[var(--ink-900)] truncate">
-                        {currentUser.fullName}
+                        {currentUser.full_name ?? currentUser.username}
                       </div>
                       <div className="text-[11.5px] text-[var(--ink-500)] truncate">
                         {currentUser.email}

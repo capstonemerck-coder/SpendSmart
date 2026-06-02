@@ -78,7 +78,7 @@ export default function UserHome({ onNavigate }: UserHomeProps) {
   if (!currentUser) return null;
 
   const permitted  = ALL_SCREENS.filter((s) => hasPermission(s));
-  const firstName  = currentUser.fullName.split(' ')[0];
+  const firstName  = (currentUser.full_name ?? currentUser.username).split(' ')[0];
 
   return (
     <div

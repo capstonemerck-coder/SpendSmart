@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { NavBar } from '@/components/shared/layout/NavBar';
 import { FilterBar } from '@/components/shared/layout/FilterBar';
-import { LoginModal } from '@/components/shared/modals/LoginModal';
 import UnauthorizedScreen from '@/components/shared/layout/UnauthorizedScreen';
+import { LoadingState } from '@/components/shared/feedback/LoadingState';
 import LandingPage from '@/pages/Landing';
 import UserHome from '@/pages/UserHome';
 import AdminDashboard from '@/pages/AdminDashboard';
@@ -43,13 +43,12 @@ export default function App() {
 
 // ── Shell ───────────────────────────────────────────────────────────────────
 function AppShell() {
-  const { currentUser, hasPermission } = useAuth();
-  const [showLogin, setShowLogin] = useState(false);
+  const { currentUser, hasPermission, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('HOME');
   const [savedScenarios, setSavedScenarios] = useState<Scenario[]>(INITIAL_SCENARIOS);
   const [activeOutcomeScenarioId, setActiveOutcomeScenarioId] = useState<string | null>(null);
 
-  // Route to correct home after login
+  // Route to correct home tab after login
   useEffect(() => {
     if (currentUser) {
       setActiveTab(currentUser.role === 'admin' ? 'ADMIN' : 'HOME');
@@ -63,19 +62,15 @@ function AppShell() {
     setActiveTab('SCENARIO OUTCOME');
   };
 
-  // ── Logged-out state: landing ────────────────────────────────────────────
+  // ── Session restore in progress ──────────────────────────────────────────
+  if (isLoading) {
+    return <LoadingState fullScreen message="Loading SpendSmart…" />;
+  }
+
+  // ── Logged-out state: show landing page ──────────────────────────────────
+  // Landing manages its own login button and LoginModal.
   if (!currentUser) {
-    return (
-      <>
-        <LandingPage onLoginClick={() => setShowLogin(true)} />
-        {showLogin && (
-          <LoginModal
-            onClose={() => setShowLogin(false)}
-            onSuccess={() => setShowLogin(false)}
-          />
-        )}
-      </>
-    );
+    return <LandingPage />;
   }
 
   // ── Logged-in state: full shell ──────────────────────────────────────────
@@ -99,7 +94,7 @@ function AppShell() {
       return <AdminDashboard />;
     }
 
-    // Permission guard
+    // Permission guard for screen tabs
     const screen = activeTab as ScreenPermission;
     if (!hasPermission(screen)) {
       return <UnauthorizedScreen attemptedScreen={screen} onGoHome={() => setActiveTab('HOME')} />;

@@ -1,4 +1,85 @@
 // ============================================================================
+// Data Input — Cycles
+// ============================================================================
+
+export interface CycleSummary {
+  cycle_id: string;
+  description: string | null;
+  is_active: boolean | null;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string | null;
+  metadata_id: number | null;
+  target_variable: string | null;
+}
+
+export interface CycleCreatePayload {
+  cycle_id: string;
+  description?: string;
+}
+
+// ============================================================================
+// Data Input — Uploads
+// ============================================================================
+
+/** Status values used by the Upload model. */
+export type UploadStatus = 'pending' | 'processing' | 'success' | 'failed';
+
+export interface SubchannelParam {
+  subchannel_name: string;
+  roi_coefficient: number;
+  min_spend: number;
+  max_spend: number;
+}
+
+export interface ChannelParam {
+  channel_name: string;
+  roi_coefficient: number;
+  min_spend: number;
+  max_spend: number;
+  subchannels: SubchannelParam[];
+}
+
+/** Returned by POST /uploads/parse — preview before committing. */
+export interface UploadPreview {
+  upload_record_id: number;
+  cycle_id: string;
+  row_count: number;
+  channels: ChannelParam[];
+}
+
+/** Single upload record from GET /uploads or GET /uploads/:id. */
+export interface UploadRecordSummary {
+  upload_id: number;
+  cycle_id: string | null;
+  is_datafile: boolean;
+  upload_type: string | null;
+  filename: string | null;
+  file_size_bytes: number | null;
+  row_count: number | null;
+  status: string;
+  error_message: string | null;
+  uploaded_at: string;
+  uploader_name: string | null;
+}
+
+export interface UploadHistoryParams {
+  cycle_id?: string;
+  status?: string;
+  upload_type?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface PaginatedUploadHistory {
+  records: UploadRecordSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+// ============================================================================
 // Scenario types
 // ============================================================================
 
@@ -55,15 +136,18 @@ export const ALL_SCREENS: ScreenPermission[] = [
   'SCENARIO COMPARISONS',
 ];
 
+/**
+ * User record returned by GET /api/v1/users and GET /api/v1/auth/me.
+ * Field names match the backend UserOut schema exactly.
+ */
 export interface User {
-  id: string;
+  user_id: number;
   username: string;
-  password: string; // demo only — never store plaintext in production
-  fullName: string;
-  email?: string;
-  region?: string;
-  role: Role;
-  permissions: ScreenPermission[];
-  createdAt: string;
-  active: boolean;
+  full_name: string | null;
+  email: string | null;
+  region: string | null;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  permissions: string[];
 }

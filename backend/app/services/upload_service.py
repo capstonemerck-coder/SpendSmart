@@ -1,28 +1,45 @@
 """
-Upload Service — validates and ingests DATA_FACT and MODEL_FACT CSV/XLSX files.
+Upload Service — validates and ingests CSV/XLSX files.
 
-Pipeline:
+Covers two distinct ingestion flows:
+
+DATA_FACT / MODEL_FACT (direct ingest):
   1. Parse file (CSV or XLSX)
   2. Validate schema (required columns, dtypes)
   3. Detect duplicates
   4. Transactional batch insert
   5. Create upload audit record
+
+Channel Parameter (two-step parse/commit):
+  1. POST /uploads/parse  — parses file, creates pending Upload + ChannelParameter rows
+  2. POST /uploads/commit — marks Upload as 'success', making the data active
 """
 from __future__ import annotations
 
 import io
 import logging
-from datetime import datetime
+from math import ceil
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import delete, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import UploadError
-from app.models.models import CycleDef, DataFact, ModelFact, Upload
+from app.core.exceptions import ConflictError, NotFoundError, UploadError
+from app.core.exceptions import ValidationError as AppValidationError
+from app.models.models import (
+    ChannelParameter, CycleDef, DataFact, ModelFact, SubchannelParameter, Upload,
+)
+from app.schemas.schemas import (
+    ChannelParamOut, PaginatedUploads, SubchannelParamOut, UploadCommitIn,
+    UploadOut, UploadPreviewOut,
+)
 
 logger = logging.getLogger(__name__)
+
+# Required columns for channel parameter files.
+CHANNEL_PARAM_REQUIRED = ["channel_name", "subchannel_name", "roi_coefficient", "min_spend", "max_spend"]
 
 # ── Required column definitions ───────────────────────────────────────────────
 
@@ -337,3 +354,341 @@ class UploadService:
             return int(float(v)) if v is not None and str(v).strip() != "" else None
         except (ValueError, TypeError):
             return None
+
+
+# ── Channel parameter two-step flow ───────────────────────────────────────────
+
+def _parse_file_bytes(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    """
+    Parse raw bytes into a DataFrame, supporting CSV and XLSX.
+
+    Args:
+        file_bytes: Raw file content.
+        filename:   Original filename (used to detect format via extension).
+
+    Returns:
+        DataFrame with all columns as strings (dtype=str).
+
+    Raises:
+        AppValidationError: If the file format is not .csv or .xlsx.
+    """
+    name = filename.lower()
+    if name.endswith(".csv"):
+        return pd.read_csv(io.BytesIO(file_bytes), dtype=str, keep_default_na=False)
+    elif name.endswith((".xlsx", ".xls")):
+        return pd.read_excel(io.BytesIO(file_bytes), dtype=str, keep_default_na=False)
+    else:
+        raise AppValidationError("Only CSV and XLSX files are supported.")
+
+
+def _safe_float_val(v: Any) -> Optional[float]:
+    """Convert a value to float, returning None on failure."""
+    try:
+        return float(v) if v is not None and str(v).strip() != "" else None
+    except (ValueError, TypeError):
+        return None
+
+
+async def parse_channel_params_file(
+    file_bytes: bytes,
+    filename: str,
+    cycle_id: str,
+    uploaded_by: int,
+    db: AsyncSession,
+) -> UploadPreviewOut:
+    """
+    Parse a channel parameter file and create a pending upload record.
+
+    Expects columns: channel_name, subchannel_name, roi_coefficient, min_spend, max_spend.
+    Each row represents one subchannel. Channel-level parameters are aggregated
+    (average ROI, summed spend bounds) from their subchannel rows.
+
+    Creates a pending Upload record and the associated ChannelParameter /
+    SubchannelParameter rows. The data is NOT active until commit_channel_params_upload
+    is called with the returned upload_record_id.
+
+    Args:
+        file_bytes:  Raw file content.
+        filename:    Original filename (used for format detection and audit trail).
+        cycle_id:    Identifier of the planning cycle this upload belongs to.
+        uploaded_by: user_id of the authenticated uploader.
+        db:          Async database session.
+
+    Returns:
+        UploadPreviewOut containing the upload_record_id and parsed channel hierarchy.
+
+    Raises:
+        AppValidationError: For unsupported file format, missing required columns,
+                            or invalid data values.
+        NotFoundError:      If the specified cycle_id does not exist.
+    """
+    # Validate file size is handled in the endpoint; format check is here.
+    df = _parse_file_bytes(file_bytes, filename)
+
+    if df.empty:
+        raise AppValidationError("Uploaded file contains no data rows.")
+
+    # Normalize column names: strip whitespace, lower-case.
+    df.columns = [c.strip().lower() for c in df.columns]
+
+    missing_cols = [c for c in CHANNEL_PARAM_REQUIRED if c not in df.columns]
+    if missing_cols:
+        raise AppValidationError(
+            f"Missing required columns: {', '.join(missing_cols)}. "
+            f"Required: {', '.join(CHANNEL_PARAM_REQUIRED)}"
+        )
+
+    # Strip whitespace from string columns.
+    for col in ["channel_name", "subchannel_name"]:
+        df[col] = df[col].str.strip()
+
+    # Row-level validation: collect all errors, then raise if any exist.
+    errors: List[str] = []
+    for idx, row in df.iterrows():
+        row_num = int(idx) + 2  # 1-indexed + 1 for header row
+        channel = str(row["channel_name"])
+        sub = str(row["subchannel_name"])
+        roi = _safe_float_val(row["roi_coefficient"])
+        min_s = _safe_float_val(row["min_spend"])
+        max_s = _safe_float_val(row["max_spend"])
+
+        if not channel:
+            errors.append(f"Row {row_num}: channel_name is required.")
+        if not sub:
+            errors.append(f"Row {row_num}: subchannel_name is required.")
+        if roi is None or roi <= 0:
+            errors.append(
+                f"Row {row_num}: roi_coefficient must be > 0 (got '{row['roi_coefficient']}')."
+            )
+        if min_s is None or min_s < 0:
+            errors.append(f"Row {row_num}: min_spend must be >= 0.")
+        if max_s is None:
+            errors.append(f"Row {row_num}: max_spend is required.")
+        elif min_s is not None and max_s < min_s:
+            errors.append(
+                f"Row {row_num}: max_spend ({max_s}) must be >= min_spend ({min_s})."
+            )
+
+    if errors:
+        # Surface the first five errors; truncate with count if more.
+        displayed = errors[:5]
+        suffix = f" (+{len(errors) - 5} more)" if len(errors) > 5 else ""
+        raise AppValidationError("; ".join(displayed) + suffix)
+
+    # Verify the cycle exists before creating any records.
+    cycle_result = await db.execute(
+        select(CycleDef).where(CycleDef.cycle_id == cycle_id)
+    )
+    if not cycle_result.scalar_one_or_none():
+        raise NotFoundError(f"Cycle '{cycle_id}' not found.")
+
+    # Create a pending Upload audit record.
+    upload = Upload(
+        cycle_id=cycle_id,
+        is_datafile=False,
+        upload_type="channel_params",
+        filename=filename,
+        file_size_bytes=len(file_bytes),
+        row_count=len(df),
+        status="pending",
+        uploaded_by=uploaded_by,
+    )
+    db.add(upload)
+    await db.flush()  # generates upload.upload_id
+
+    # Group rows by channel and create ChannelParameter / SubchannelParameter records.
+    channel_params_out: List[ChannelParamOut] = []
+
+    for channel_name, group in df.groupby("channel_name", sort=False):
+        rois = [r for r in (
+            _safe_float_val(v) for v in group["roi_coefficient"]
+        ) if r is not None]
+        avg_roi = sum(rois) / len(rois) if rois else 0.0
+        total_min = sum(_safe_float_val(v) or 0.0 for v in group["min_spend"])
+        total_max = sum(_safe_float_val(v) or 0.0 for v in group["max_spend"])
+
+        channel_param = ChannelParameter(
+            upload_id=upload.upload_id,
+            cycle_id=cycle_id,
+            channel_name=str(channel_name),
+            roi_coefficient=avg_roi,
+            min_spend=total_min,
+            max_spend=total_max,
+        )
+        db.add(channel_param)
+        await db.flush()  # generates channel_param.id
+
+        subchannels_out: List[SubchannelParamOut] = []
+        for _, sub_row in group.iterrows():
+            roi_val = _safe_float_val(sub_row["roi_coefficient"]) or 0.0
+            min_val = _safe_float_val(sub_row["min_spend"]) or 0.0
+            max_val = _safe_float_val(sub_row["max_spend"]) or 0.0
+
+            sub_param = SubchannelParameter(
+                channel_parameter_id=channel_param.id,
+                subchannel_name=str(sub_row["subchannel_name"]),
+                roi_coefficient=roi_val,
+                min_spend=min_val,
+                max_spend=max_val,
+            )
+            db.add(sub_param)
+            subchannels_out.append(SubchannelParamOut(
+                subchannel_name=str(sub_row["subchannel_name"]),
+                roi_coefficient=roi_val,
+                min_spend=min_val,
+                max_spend=max_val,
+            ))
+
+        await db.flush()
+
+        channel_params_out.append(ChannelParamOut(
+            channel_name=str(channel_name),
+            roi_coefficient=avg_roi,
+            min_spend=total_min,
+            max_spend=total_max,
+            subchannels=subchannels_out,
+        ))
+
+    logger.info(
+        "Parsed channel params: upload_id=%d, cycle=%s, channels=%d, rows=%d",
+        upload.upload_id, cycle_id, len(channel_params_out), len(df),
+    )
+    return UploadPreviewOut(
+        upload_record_id=upload.upload_id,
+        cycle_id=cycle_id,
+        row_count=len(df),
+        channels=channel_params_out,
+    )
+
+
+async def commit_channel_params_upload(
+    upload_record_id: int,
+    db: AsyncSession,
+) -> UploadOut:
+    """
+    Commit a pending channel parameter upload, making its data active.
+
+    Changes the Upload status from 'pending' to 'success'. Downstream modules
+    (scenario planning, optimizer) only consume ChannelParameter records whose
+    linked Upload.status = 'success'.
+
+    Args:
+        upload_record_id: ID of the pending Upload record to commit.
+        db:               Async database session.
+
+    Returns:
+        UploadOut schema for the now-committed upload record.
+
+    Raises:
+        NotFoundError:  If no upload record with the given ID exists.
+        ConflictError:  If the upload record is not in 'pending' status
+                        (already committed or failed).
+    """
+    result = await db.execute(
+        select(Upload).where(Upload.upload_id == upload_record_id)
+    )
+    upload = result.scalar_one_or_none()
+    if not upload:
+        raise NotFoundError(f"Upload record {upload_record_id} not found.")
+
+    if upload.status != "pending":
+        raise ConflictError(
+            f"Upload record {upload_record_id} is in '{upload.status}' status "
+            "and cannot be committed. Only 'pending' uploads can be committed."
+        )
+
+    upload.status = "success"
+    await db.flush()
+    await db.refresh(upload)
+    logger.info("Channel params upload committed: upload_id=%d", upload_record_id)
+    return UploadOut.model_validate(upload)
+
+
+async def get_upload_history(
+    db: AsyncSession,
+    cycle_id: Optional[str] = None,
+    status: Optional[str] = None,
+    upload_type: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> PaginatedUploads:
+    """
+    Return paginated upload records, optionally filtered by cycle, status, and type.
+
+    Uses selectinload to avoid N+1 queries when accessing uploader username.
+    Ordered by upload date descending (most recent first).
+
+    Args:
+        db:          Async database session.
+        cycle_id:    Filter to uploads for a specific cycle.
+        status:      Filter by status ('pending', 'processing', 'success', 'failed').
+        upload_type: Filter by type ('data_fact', 'model_fact', 'channel_params').
+        page:        Page number (1-indexed).
+        page_size:   Number of records per page.
+
+    Returns:
+        PaginatedUploads schema with records and pagination metadata.
+    """
+    base_stmt = (
+        select(Upload)
+        .options(selectinload(Upload.uploader))
+        .order_by(Upload.uploaded_at.desc())
+    )
+
+    if cycle_id:
+        base_stmt = base_stmt.where(Upload.cycle_id == cycle_id)
+    if status:
+        base_stmt = base_stmt.where(Upload.status == status)
+    if upload_type:
+        base_stmt = base_stmt.where(Upload.upload_type == upload_type)
+
+    # Count total matching records for pagination metadata.
+    count_stmt = select(func.count()).select_from(base_stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    # Apply pagination.
+    paged_stmt = base_stmt.offset((page - 1) * page_size).limit(page_size)
+    records = list((await db.execute(paged_stmt)).scalars().all())
+
+    # Build response — enrich with uploader name from loaded relationship.
+    record_outs: List[UploadOut] = []
+    for r in records:
+        out = UploadOut.model_validate(r)
+        if r.uploader:
+            out.uploader_name = r.uploader.username
+        record_outs.append(out)
+
+    return PaginatedUploads(
+        records=record_outs,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=ceil(total / page_size) if total > 0 else 0,
+    )
+
+
+async def delete_upload_record(upload_record_id: int, db: AsyncSession) -> None:
+    """
+    Hard-delete an upload record and all its associated channel/subchannel parameters.
+
+    Cascade is handled at the SQLAlchemy relationship level via
+    cascade="all, delete-orphan" on Upload.channel_parameters, so this function
+    only needs to delete the Upload record itself.
+
+    Args:
+        upload_record_id: ID of the Upload record to delete.
+        db:               Async database session.
+
+    Raises:
+        NotFoundError: If no upload record with the given ID exists.
+    """
+    result = await db.execute(
+        select(Upload).where(Upload.upload_id == upload_record_id)
+    )
+    upload = result.scalar_one_or_none()
+    if not upload:
+        raise NotFoundError(f"Upload record {upload_record_id} not found.")
+
+    await db.delete(upload)
+    await db.flush()
+    logger.info("Upload record %d deleted (cascade includes channel params).", upload_record_id)

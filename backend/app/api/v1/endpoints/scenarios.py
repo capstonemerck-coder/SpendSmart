@@ -169,7 +169,7 @@ async def update_scenario(
     return scenario
 
 
-@router.delete("/{scenario_id}", status_code=204)
+@router.delete("/{scenario_id}", status_code=204, response_model=None)
 async def delete_scenario(
     scenario_id: int,
     _: User = Depends(get_current_user),

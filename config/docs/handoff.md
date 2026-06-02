@@ -251,18 +251,168 @@ SpendSmart/
 
 ---
 
+## Data Input Module — Session 2026-06-02
+
+### What was built
+
+Complete end-to-end Data Input module. Allows Admins and Data Scientists to manage
+planning cycles and upload channel/subchannel MMM parameter files via a two-step
+parse → commit flow. Brand Intelligence Analysts and other roles see a read-only view.
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `backend/alembic/versions/0002_data_input_models.py` | Migration: extends cycle_def, adds upload_type to uploads, creates channel_parameter and subchannel_parameter tables |
+| `backend/app/services/cycle_service.py` | All CRUD business logic for planning cycles |
+| `frontend/src/hooks/useUploadCycles.ts` | Fetches and manages cycle list state |
+| `frontend/src/hooks/useUploadActions.ts` | Manages the parse → commit two-step upload flow |
+| `frontend/src/hooks/useUploadHistory.ts` | Paginated, filterable upload history state |
+| `frontend/src/hooks/useCycleCreate.ts` | Cycle creation state and handler |
+| `frontend/src/components/shared/data/UploadPreviewTable.tsx` | Expandable channel/subchannel preview table |
+| `frontend/src/components/shared/data/UploadStatusBadge.tsx` | Color-coded status badge for upload records |
+| `frontend/src/components/shared/modals/CycleCreateModal.tsx` | Modal for creating a new planning cycle |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `backend/app/models/models.py` | CycleDef: added description, is_active, created_by, updated_at; Upload: added upload_type; new ChannelParameter and SubchannelParameter models |
+| `backend/app/schemas/schemas.py` | Extended CycleCreate/CycleOut; added CycleUpdate, SubchannelParamOut, ChannelParamOut, UploadPreviewOut, UploadCommitIn, PaginatedUploads |
+| `backend/app/services/upload_service.py` | Added: parse_channel_params_file, commit_channel_params_upload, get_upload_history, delete_upload_record |
+| `backend/app/api/v1/endpoints/cycles.py` | Added PUT update and DELETE endpoints; POST now sets created_by from current_user; moved SQL to cycle_service |
+| `backend/app/api/v1/endpoints/uploads.py` | Added POST /parse, POST /commit; GET / now returns PaginatedUploads; added DELETE /:id |
+| `frontend/src/utils/types.ts` | Added CycleSummary, CycleCreatePayload, UploadStatus, ChannelParam, SubchannelParam, UploadPreview, UploadRecordSummary, UploadHistoryParams, PaginatedUploadHistory |
+| `frontend/src/services/upload.service.ts` | Full rewrite: added fetchAllCycles, createCycle, parseUploadFile, commitUpload, fetchUploadHistory, deleteUploadRecord; preserved legacy uploadDataFact/uploadModelFact |
+| `frontend/src/pages/DataInput.tsx` | Complete rewrite: API-connected cycle selector, file upload, parse/commit flow, role-based access |
+| `frontend/src/pages/DataHistory.tsx` | Complete rewrite: API-connected paginated history with cycle/status filters and admin delete |
+
+### Architectural decisions
+
+**Why cycle_id is still a string PK:** The existing CycleDef uses cycle_id (e.g., "Q3-2025") as a string PK
+wired across all other tables (data_fact, model_fact, scenario_header). Changing it to an integer would
+require cascading FK changes across 6+ tables. The existing design is preserved; the frontend treats cycle_id
+as both the identifier and display name.
+
+**Why parse creates DB records immediately:** The parse endpoint creates the ChannelParameter/SubchannelParameter
+rows with status="pending" during parse. During commit, the Upload status is simply flipped to "success".
+This avoids server-side caching between parse and commit. Downstream modules filter for Upload.status="success".
+Abandoned pending records (user parsed but never committed) are benign for local dev.
+
+**Why cycle delete is blocked at the service layer:** Deleting a cycle that has uploads would orphan Upload records
+and all downstream data (ChannelParameter, ScenarioHeader). The block is in cycle_service.delete_cycle() rather
+than via a DB-level ON DELETE RESTRICT so the error message is human-readable and specific.
+
+**UploadPreviewTable uses client-side expand state:** All channel rows start expanded, and expand state is local
+to the component (not in the hook). This is appropriate since the preview table is ephemeral — it's shown once
+between parse and commit, then disappears.
+
+### Known issues
+
+- **CycleDef.updated_at trigger:** PostgreSQL's `onupdate=func.now()` requires the ORM to issue the UPDATE via
+  SQLAlchemy. If rows are updated with raw SQL, `updated_at` won't auto-update. This is only relevant for future
+  migrations that bulk-update cycle rows.
+- **Abandoned pending uploads:** If a user parses a file but never commits, a pending Upload record and its
+  ChannelParameter rows remain in the DB. For local dev this is fine; before staging, add a scheduled cleanup job.
+- **UploadStatusBadge "Processing":** The 'processing' status is included for completeness but is never set by
+  the current parse/commit flow (which goes directly from pending → success). It would be used by a future
+  async processing queue.
+- **DataHistory shows all upload types:** The history page shows DATA_FACT, MODEL_FACT, and channel_params uploads.
+  Future work: add an `upload_type` filter to the filter bar so users can narrow to specific types.
+
+### What the next module (Model Summary) will need from this module
+
+- **Channel parameters:** Model Summary reads from `channel_parameter` and `subchannel_parameter` tables where
+  `Upload.status = 'success'` and `Upload.cycle_id = {selected_cycle}`. Use `selectinload` to avoid N+1.
+- **Active cycle selection:** DataInput and Model Summary both need a cycle selector. The existing `GET /cycles`
+  endpoint is shared. Consider a context-level "active cycle" if multiple screens need the same selection.
+- **ROI and spend bounds from ChannelParameter:** The Model Summary's per-channel ROI values come from
+  `ChannelParameter.roi_coefficient`. This replaces the `ModelChannelCalculation.roi` used by the old optimizer
+  flow for the simplified parameter model.
+
+---
+
+## Auth Module — Session 2026-05-29
+
+### What was built
+
+The complete Auth module was implemented end-to-end, connecting the frontend to the real backend API.
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `backend/alembic/env.py` | Async-compatible Alembic environment config |
+| `backend/alembic/script.py.mako` | Standard Alembic migration template |
+| `backend/alembic/versions/0001_user_auth_fields.py` | Migration: adds `updated_at`, email unique constraint + index |
+| `frontend/src/hooks/useAdminUsers.ts` | New hook: admin user CRUD via API |
+| `frontend/src/components/shared/feedback/LoadingState.tsx` | Spinner component (was empty) |
+| `frontend/src/components/shared/feedback/ErrorState.tsx` | Error display component (was empty) |
+| `frontend/src/components/shared/feedback/EmptyState.tsx` | Empty data component (was empty) |
+| `frontend/src/components/shared/feedback/SkeletonTable.tsx` | Table skeleton (was empty) |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `backend/app/models/models.py` | User: added `updated_at`, made `email` unique + indexed |
+| `backend/app/schemas/schemas.py` | `LoginRequest.username` → `email`; `UserOut` gains `permissions` |
+| `backend/app/api/v1/endpoints/auth.py` | Login by email, 401 vs 403 separation, `/me` returns permissions |
+| `backend/app/db/seed.py` | Seed users get email addresses (admin@merck.com, etc.) |
+| `backend/app/main.py` | Fixed missing `engine` import in lifespan (NameError bug) |
+| `frontend/src/utils/types.ts` | `User` interface updated to match API field names (snake_case) |
+| `frontend/src/services/auth.service.ts` | Email-based login, full JSDoc, session restore caches profile |
+| `frontend/src/context/AuthContext.tsx` | Full rewrite: real API, async login, JWT restore on mount |
+| `frontend/src/hooks/useAuth.ts` | Module JSDoc + `isAdmin`, `isAnalyst`, `isAuthenticated` |
+| `frontend/src/components/shared/modals/LoginModal.tsx` | Email field, async, field-level validation, demo email creds |
+| `frontend/src/pages/Landing.tsx` | Removed dead `currentUser` branch, simplified |
+| `frontend/src/pages/AdminDashboard.tsx` | Uses `useAdminUsers` hook, updated to API field names |
+| `frontend/src/components/shared/layout/NavBar.tsx` | `fullName` → `full_name` |
+| `frontend/src/pages/UserHome.tsx` | `fullName` → `full_name` |
+| `frontend/src/app.tsx` | Added `isLoading` gate, removed redundant LoginModal |
+
+### Decisions made
+
+**Email-based login (not username):** The task requires email + password auth. The backend `LoginRequest` now uses `EmailStr`. Seed users have emails assigned (admin@merck.com, analyst@merck.com, scientist@merck.com). The `username` field still exists on users for display purposes.
+
+**Separate 401 vs 403:** Invalid credentials raise `AuthenticationError` (401). Deactivated accounts raise `AuthorizationError` (403). The order in auth.py is intentional: password is checked before active status to avoid user enumeration (an attacker can't tell whether the account exists).
+
+**`/me` returns permissions:** GET /auth/me now queries `ROLE_SCREEN_PERMISSIONS` and returns the full `UserOut` including `permissions: List[str]`. This means the frontend always has an up-to-date permission list after session restore — no need to store permissions separately from the JWT.
+
+**User type renamed fields:** `User.id` → `user_id`, `fullName` → `full_name`, `active` → `is_active`, `createdAt` → `created_at`, `password` removed. These match the backend `UserOut` schema exactly so no normalization layer is needed.
+
+**Admin user management moved to `useAdminUsers` hook:** AuthContext no longer holds the users list or admin CRUD methods. These are now in `hooks/useAdminUsers.ts`, which loads users from the API on mount. AdminDashboard uses this hook directly.
+
+**Feedback components implemented:** `LoadingState`, `ErrorState`, `EmptyState`, and `SkeletonTable` were all empty files. They've been implemented so auth screens can use them.
+
+**Alembic for dev-with-existing-DB:** The app uses `create_tables()` in dev mode (new setups get the correct schema automatically). The Alembic migration handles existing setups that already have the `users` table from an earlier run.
+
+### Known issues / edge cases
+
+- **Demo login flow requires email input.** The LoginModal now has email fields and demo credential buttons pre-fill with `@merck.com` emails. The old username-based flow is no longer supported.
+- **`PermissionsModal` in AdminDashboard is read-only.** Per-user permission overrides are not stored in the DB — permissions are entirely role-derived. The modal shows current permissions but does not allow editing. To change a user's access, change their role.
+- **`authService.me()` on session restore:** If the backend is unreachable at app startup, the stored user session is cleared. This is intentional — a stale token should not grant access when the server is down.
+- **Email uniqueness with NULL values:** PostgreSQL's unique index on `users.email` allows multiple NULL emails (NULLs are distinct). Seed users without emails won't conflict.
+
+---
+
 ## Current state and what's left
 
 ### Done
 - Full backend — all APIs, optimizer engine, upload pipeline, auth, RBAC, DB models
 - Full frontend UI — all 9 screens, navigation, design system, Merck branding
+- **Auth module fully integrated** — email-based login, JWT session, role-based routing
+- **Admin Dashboard wired to API** — user list, create, delete all hit real endpoints
 - 31 passing unit tests covering the optimizer math and upload validation
 - Docker Compose config for when containerization is needed
 - Azure Pipelines CI/CD config ready for Azure DevOps
 
 ### Not done yet — the integration gap
 
-The frontend currently runs with **mock/in-memory data**. The service files in `frontend/src/services/` are written and ready, but the page components (`DataInput.tsx`, `ScenarioPlanning.tsx`, `ScenarioOutcome.tsx`, etc.) still use local React state instead of calling those services.
+The frontend currently runs with **mock/in-memory data** for all modules except Auth and Admin.
+The service files in `frontend/src/services/` are written and ready, but the page components
+(`DataInput.tsx`, `ScenarioPlanning.tsx`, `ScenarioOutcome.tsx`, etc.) still use local React
+state instead of calling those services.
 
 **What the integration work involves**, page by page:
 

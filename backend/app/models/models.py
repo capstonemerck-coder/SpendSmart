@@ -3,7 +3,7 @@ SQLAlchemy ORM models.
 
 Matches the ERD:
   Master tables:  META_DATA, ROLE_SCREEN_PERMISSIONS
-  Upload tables:  DATA_FACT, MODEL_FACT
+  Upload tables:  DATA_FACT, MODEL_FACT, CHANNEL_PARAMETER, SUBCHANNEL_PARAMETER
   Derived tables: MODEL_CHANNEL_CALCULATIONS, SCENARIO_CHANNEL_RESULTS, SCENARIO_OUTCOME
   App tables:     USERS, UPLOADS, CYCLE_DEF, CHANNEL_HIERARCHY,
                   SCENARIO_HEADER, SCENARIO_CONSTRAINTS
@@ -126,7 +126,12 @@ class ChannelHierarchy(Base):
 # ── Cycle Definition ──────────────────────────────────────────────────────────
 
 class CycleDef(Base):
-    """CYCLE_DEF — a planning cycle (e.g. Q1 2026)."""
+    """
+    CYCLE_DEF — a named planning cycle (e.g. "Q3-2025").
+
+    Extended with description, active flag, and creator reference to support
+    the Data Input module's cycle management workflow.
+    """
     __tablename__ = "cycle_def"
 
     cycle_id: Mapped[str] = mapped_column(String(50), primary_key=True)
@@ -137,11 +142,22 @@ class CycleDef(Base):
     time_granularity: Mapped[Optional[str]] = mapped_column(String(50))
     cycle_start_date: Mapped[Optional[datetime]] = mapped_column(Date)
     cycle_end_date: Mapped[Optional[datetime]] = mapped_column(Date)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default="true"
+    )
+    created_by: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.user_id"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     meta: Mapped[Optional["MetaData"]] = relationship("MetaData", back_populates="cycles")
+    creator: Mapped[Optional["User"]] = relationship("User", foreign_keys=[created_by])
     uploads: Mapped[list["Upload"]] = relationship("Upload", back_populates="cycle")
     data_facts: Mapped[list["DataFact"]] = relationship("DataFact", back_populates="cycle")
     model_facts: Mapped[list["ModelFact"]] = relationship("ModelFact", back_populates="cycle")
@@ -151,23 +167,35 @@ class CycleDef(Base):
     scenarios: Mapped[list["ScenarioHeader"]] = relationship(
         "ScenarioHeader", back_populates="cycle"
     )
+    channel_parameters: Mapped[list["ChannelParameter"]] = relationship(
+        "ChannelParameter", back_populates="cycle"
+    )
 
 
 # ── Uploads ───────────────────────────────────────────────────────────────────
 
 class Upload(Base):
-    """UPLOADS — file upload audit log."""
+    """
+    UPLOADS — file upload audit log.
+
+    Covers DATA_FACT, MODEL_FACT, and CHANNEL_PARAMS upload types.
+    upload_type distinguishes between the three; is_datafile preserved for
+    backward compatibility with existing DATA_FACT / MODEL_FACT uploads.
+    """
     __tablename__ = "uploads"
 
     upload_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     cycle_id: Mapped[Optional[str]] = mapped_column(
         String(50), ForeignKey("cycle_def.cycle_id"), index=True
     )
-    is_datafile: Mapped[bool] = mapped_column(Boolean, nullable=False)  # True=DATA_FACT, False=MODEL_FACT
+    is_datafile: Mapped[bool] = mapped_column(Boolean, nullable=False)  # True=DATA_FACT, False=MODEL_FACT/channel_params
+    upload_type: Mapped[Optional[str]] = mapped_column(
+        String(50)
+    )  # "data_fact" | "model_fact" | "channel_params" — NULL for legacy rows
     filename: Mapped[Optional[str]] = mapped_column(String(500))
     file_size_bytes: Mapped[Optional[int]] = mapped_column(BigInteger)
     row_count: Mapped[Optional[int]] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending|success|failed
+    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending|processing|success|failed
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     uploaded_by: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.user_id"), index=True
@@ -178,6 +206,9 @@ class Upload(Base):
 
     cycle: Mapped[Optional["CycleDef"]] = relationship("CycleDef", back_populates="uploads")
     uploader: Mapped[Optional["User"]] = relationship("User", back_populates="uploads")
+    channel_parameters: Mapped[list["ChannelParameter"]] = relationship(
+        "ChannelParameter", back_populates="upload", cascade="all, delete-orphan"
+    )
 
 
 # ── DATA_FACT ─────────────────────────────────────────────────────────────────
@@ -393,4 +424,65 @@ class ScenarioOutcome(Base):
 
     scenario: Mapped["ScenarioHeader"] = relationship(
         "ScenarioHeader", back_populates="outcome"
+    )
+
+
+# ── Channel / Subchannel Parameters ──────────────────────────────────────────
+
+class ChannelParameter(Base):
+    """
+    CHANNEL_PARAMETER — per-channel MMM parameters parsed from uploaded files.
+
+    One row per channel per upload. Aggregated from subchannel rows.
+    Linked to an Upload record (status tracks whether the upload is committed).
+    Downstream modules (scenario planning, optimizer) read from records whose
+    linked Upload.status = 'success'.
+    """
+    __tablename__ = "channel_parameter"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    upload_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("uploads.upload_id"), nullable=False, index=True
+    )
+    cycle_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("cycle_def.cycle_id"), nullable=False, index=True
+    )
+    channel_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    roi_coefficient: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    min_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
+    max_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    upload: Mapped["Upload"] = relationship("Upload", back_populates="channel_parameters")
+    cycle: Mapped["CycleDef"] = relationship("CycleDef", back_populates="channel_parameters")
+    subchannels: Mapped[list["SubchannelParameter"]] = relationship(
+        "SubchannelParameter", back_populates="channel_parameter", cascade="all, delete-orphan"
+    )
+
+
+class SubchannelParameter(Base):
+    """
+    SUBCHANNEL_PARAMETER — per-subchannel MMM parameters.
+
+    One row per subchannel, child of ChannelParameter.
+    These are the atomic rows from the uploaded channel parameter file.
+    """
+    __tablename__ = "subchannel_parameter"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    channel_parameter_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("channel_parameter.id"), nullable=False, index=True
+    )
+    subchannel_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    roi_coefficient: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    min_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
+    max_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    channel_parameter: Mapped["ChannelParameter"] = relationship(
+        "ChannelParameter", back_populates="subchannels"
     )

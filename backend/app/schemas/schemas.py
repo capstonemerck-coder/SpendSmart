@@ -4,6 +4,7 @@ Pydantic v2 schemas for request/response validation.
 from __future__ import annotations
 
 from datetime import date, datetime
+from math import ceil
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -12,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
-    username: str = Field(..., min_length=1)
+    """Request body for POST /auth/login."""
+    email: EmailStr
     password: str = Field(..., min_length=1)
 
 
@@ -64,6 +66,7 @@ class UserOut(BaseModel):
     role: str
     is_active: bool
     created_at: datetime
+    permissions: List[str] = []
 
 
 # ── Metadata ──────────────────────────────────────────────────────────────────
@@ -83,8 +86,20 @@ class MetaDataOut(BaseModel):
 # ── Cycle ─────────────────────────────────────────────────────────────────────
 
 class CycleCreate(BaseModel):
+    """Request body for creating a new planning cycle."""
     cycle_id: str = Field(..., min_length=1, max_length=50)
     metadata_id: Optional[int] = None
+    target_variable: Optional[str] = None
+    time_granularity: Optional[str] = None
+    cycle_start_date: Optional[date] = None
+    cycle_end_date: Optional[date] = None
+    description: Optional[str] = None
+
+
+class CycleUpdate(BaseModel):
+    """Request body for partial update of a planning cycle."""
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
     target_variable: Optional[str] = None
     time_granularity: Optional[str] = None
     cycle_start_date: Optional[date] = None
@@ -92,6 +107,7 @@ class CycleCreate(BaseModel):
 
 
 class CycleOut(BaseModel):
+    """Response schema for a planning cycle."""
     model_config = ConfigDict(from_attributes=True)
 
     cycle_id: str
@@ -100,7 +116,11 @@ class CycleOut(BaseModel):
     time_granularity: Optional[str]
     cycle_start_date: Optional[date]
     cycle_end_date: Optional[date]
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    created_by: Optional[int] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 # ── Upload ────────────────────────────────────────────────────────────────────
@@ -113,6 +133,7 @@ class ValidationError(BaseModel):
 
 
 class UploadResponse(BaseModel):
+    """Response for DATA_FACT / MODEL_FACT uploads (direct ingest flow)."""
     upload_id: int
     cycle_id: Optional[str]
     is_datafile: bool
@@ -125,17 +146,67 @@ class UploadResponse(BaseModel):
 
 
 class UploadOut(BaseModel):
+    """Single upload record as returned by the API."""
     model_config = ConfigDict(from_attributes=True)
 
     upload_id: int
     cycle_id: Optional[str]
     is_datafile: bool
+    upload_type: Optional[str] = None
     filename: Optional[str]
     file_size_bytes: Optional[int]
     row_count: Optional[int]
     status: str
     error_message: Optional[str]
     uploaded_at: datetime
+    uploader_name: Optional[str] = None  # populated by service layer from joined user
+
+
+class PaginatedUploads(BaseModel):
+    """Paginated response wrapper for upload history."""
+    records: List[UploadOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+# ── Channel / Subchannel Parameters ──────────────────────────────────────────
+
+class SubchannelParamOut(BaseModel):
+    """Single subchannel parameter row returned in upload previews and detail views."""
+    subchannel_name: str
+    roi_coefficient: float
+    min_spend: float
+    max_spend: float
+
+
+class ChannelParamOut(BaseModel):
+    """Single channel parameter row with its subchannel children."""
+    channel_name: str
+    roi_coefficient: float
+    min_spend: float
+    max_spend: float
+    subchannels: List[SubchannelParamOut]
+
+
+class UploadPreviewOut(BaseModel):
+    """
+    Response from POST /uploads/parse.
+
+    Contains the upload_record_id (used in the commit call) and
+    the parsed channel/subchannel rows for frontend preview.
+    """
+    upload_record_id: int
+    cycle_id: str
+    row_count: int
+    channels: List[ChannelParamOut]
+
+
+class UploadCommitIn(BaseModel):
+    """Request body for POST /uploads/commit."""
+    upload_record_id: int = Field(..., gt=0)
+    cycle_id: str = Field(..., min_length=1)
 
 
 # ── Channel Hierarchy ─────────────────────────────────────────────────────────

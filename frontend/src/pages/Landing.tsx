@@ -2,31 +2,18 @@ import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import merckLogo from '@/assets/Merck.png';
 import { Button } from '@/components/shared';
-import { useAuth } from '@/context/AuthContext';
 import { LoginModal } from '@/components/shared/modals/LoginModal';
 
+/**
+ * Landing
+ *
+ * Public-facing entry point shown to unauthenticated users.
+ * Renders the Merck-branded hero with a "Sign in" button that opens LoginModal.
+ * After a successful login, AuthContext sets currentUser and app.tsx routes to
+ * the appropriate home screen automatically.
+ */
 export default function Landing() {
-  const { currentUser } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
-
-  const handleLogin = () => {
-    setShowLogin(true);
-  };
-
-  if (currentUser) {
-    return (
-      <div className="h-screen bg-white flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="font-display text-[48px] leading-[1.1] text-[var(--ink-900)] font-medium tracking-tight mb-4">
-            Welcome back, {currentUser.fullName}
-          </h1>
-          <p className="text-[15px] text-[var(--ink-500)] mb-6">
-            Use the navigation above to access your tools
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="h-screen bg-white flex flex-col font-sans overflow-hidden">
@@ -96,7 +83,7 @@ export default function Landing() {
                   </p>
 
                   <Button
-                    onClick={handleLogin}
+                    onClick={() => setShowLogin(true)}
                     variant="primary"
                     size="lg"
                     rightIcon={<ArrowRight size={15} />}

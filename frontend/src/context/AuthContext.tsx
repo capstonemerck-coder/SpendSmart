@@ -1,134 +1,80 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import type { User, ScreenPermission, Role } from '@/utils/types';
-import { ALL_SCREENS } from '@/utils/types';
-
-const ROLE_PERMISSIONS: Record<Role, ScreenPermission[]> = {
-  admin: [],
-  'data scientist': ['DATA INPUT', 'DATA HISTORY', 'MODEL SUMMARY'],
-  'brand intelligence analyst': ALL_SCREENS,
-  leadership: ['SCENARIO PLANNING', 'SCENARIO OUTCOME', 'SCENARIO COMPARISONS'],
-};
-
-const SEED_USERS: User[] = [
-  {
-    id: 'u-admin',
-    username: 'admin',
-    password: 'admin123',
-    fullName: 'Site Administrator',
-    region: 'US',
-    role: 'admin',
-    permissions: [],
-    createdAt: '2025-01-01',
-    active: true,
-  },
-  {
-    id: 'u-analyst',
-    username: 'analyst',
-    password: 'analyst123',
-    fullName: 'Maya Analyst',
-    region: 'Asia Pacific',
-    role: 'brand intelligence analyst',
-    permissions: ALL_SCREENS,
-    createdAt: '2025-02-14',
-    active: true,
-  },
-  {
-    id: 'u-scientist',
-    username: 'scientist',
-    password: 'scientist123',
-    fullName: 'Sam Data',
-    region: 'CER',
-    role: 'data scientist',
-    permissions: ['DATA INPUT', 'DATA HISTORY', 'MODEL SUMMARY'],
-    createdAt: '2025-03-02',
-    active: true,
-  },
-];
+/**
+ * AuthContext.tsx
+ *
+ * Provides global authentication state for the SpendSmart application.
+ *
+ * On mount, validates any stored JWT via GET /auth/me and restores the
+ * user session automatically. Sets isLoading = true during this check so
+ * the rest of the app can gate rendering until the session state is known.
+ *
+ * Exposes:
+ *   currentUser   — authenticated user profile (null if logged out)
+ *   isLoading     — true while the initial session check is in progress
+ *   login()       — async: authenticates and sets currentUser
+ *   logout()      — clears session and sets currentUser to null
+ *   hasPermission()— checks whether the current user may access a screen
+ *   isAuthenticated — derived boolean
+ *   isAdmin       — true if role === 'admin'
+ *   isAnalyst     — true if role === 'brand intelligence analyst'
+ */
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { ScreenPermission } from '@/utils/types';
+import { authService, type AuthUser } from '@/services/auth.service';
 
 interface AuthContextValue {
-  currentUser: User | null;
-  users: User[];
-  login: (username: string, password: string) => { ok: true } | { ok: false; error: string };
+  currentUser: AuthUser | null;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
-  createUser: (data: Omit<User, 'id' | 'createdAt'>) => { ok: true } | { ok: false; error: string };
-  updateUser: (id: string, patch: Partial<User>) => void;
-  deleteUser: (id: string) => void;
-  setUserPermissions: (id: string, permissions: ScreenPermission[]) => void;
-  setUserRole: (id: string, role: Role) => void;
-  setUserActive: (id: string, active: boolean) => void;
   hasPermission: (screen: ScreenPermission) => boolean;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+export const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<User[]>(SEED_USERS);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const login: AuthContextValue['login'] = useCallback(
-    (username, password) => {
-      const u = users.find(
-        (x) => x.username.toLowerCase() === username.toLowerCase() && x.password === password,
-      );
-      if (!u) return { ok: false, error: 'Invalid username or password.' };
-      if (!u.active) return { ok: false, error: 'This account is deactivated. Contact your admin.' };
-      setCurrentUser(u);
-      return { ok: true };
-    },
-    [users],
-  );
-
-  const logout = useCallback(() => setCurrentUser(null), []);
-
-  const createUser: AuthContextValue['createUser'] = useCallback(
-    (data) => {
-      if (!data.username.trim()) return { ok: false, error: 'Username is required.' };
-      if (!data.password.trim()) return { ok: false, error: 'Password is required.' };
-      if (users.some((u) => u.username.toLowerCase() === data.username.toLowerCase())) {
-        return { ok: false, error: `Username "${data.username}" already exists.` };
+  // On mount: restore the session if a token is present in localStorage.
+  // isLoading stays true until /me completes so the shell can show a loading screen.
+  useEffect(() => {
+    const restoreSession = async () => {
+      if (!authService.isAuthenticated()) {
+        setIsLoading(false);
+        return;
       }
-      const newUser: User = {
-        ...data,
-        id: `u-${Date.now()}`,
-        createdAt: new Date().toISOString().slice(0, 10),
-      };
-      setUsers((prev) => [...prev, newUser]);
-      return { ok: true };
-    },
-    [users],
-  );
-
-  const updateUser = useCallback((id: string, patch: Partial<User>) => {
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)));
-    setCurrentUser((cu) => (cu && cu.id === id ? { ...cu, ...patch } : cu));
+      const user = await authService.me();
+      setCurrentUser(user);
+      setIsLoading(false);
+    };
+    restoreSession();
   }, []);
 
-  const deleteUser = useCallback((id: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
+  const login = useCallback(async (email: string, password: string) => {
+    const user = await authService.login(email, password);
+    setCurrentUser(user);
   }, []);
 
-  const setUserPermissions = useCallback(
-    (id: string, permissions: ScreenPermission[]) => updateUser(id, { permissions }),
-    [updateUser],
-  );
+  const logout = useCallback(() => {
+    authService.logout();
+    setCurrentUser(null);
+  }, []);
 
-  const setUserRole = useCallback(
-    (id: string, role: Role) =>
-      updateUser(id, {
-        role,
-        permissions: ROLE_PERMISSIONS[role],
-      }),
-    [updateUser],
-  );
-
-  const setUserActive = useCallback(
-    (id: string, active: boolean) => updateUser(id, { active }),
-    [updateUser],
-  );
-
+  /**
+   * Check whether the current user has access to a given screen.
+   * Admins bypass all permission checks — they can access every screen.
+   */
   const hasPermission = useCallback(
     (screen: ScreenPermission) => {
       if (!currentUser) return false;
+      if (currentUser.role === 'admin') return true;
       return currentUser.permissions.includes(screen);
     },
     [currentUser],
@@ -136,23 +82,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value: AuthContextValue = {
     currentUser,
-    users,
+    isLoading,
     login,
     logout,
-    createUser,
-    updateUser,
-    deleteUser,
-    setUserPermissions,
-    setUserRole,
-    setUserActive,
     hasPermission,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-export function useAuth(): AuthContextValue {
+/**
+ * useAuth — access authentication state and computed role flags from any component.
+ *
+ * Returns all AuthContext values plus:
+ *   isAuthenticated — true when currentUser is set
+ *   isAdmin         — true when role === 'admin'
+ *   isAnalyst       — true when role === 'brand intelligence analyst'
+ *
+ * Must be used within <AuthProvider>.
+ */
+export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within an <AuthProvider>');
-  return ctx;
+  return {
+    ...ctx,
+    isAuthenticated: !!ctx.currentUser,
+    isAdmin: ctx.currentUser?.role === 'admin',
+    isAnalyst: ctx.currentUser?.role === 'brand intelligence analyst',
+  };
 }

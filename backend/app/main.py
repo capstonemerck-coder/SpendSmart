@@ -14,7 +14,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging
-from app.db.database import create_tables
+from app.db.database import AsyncSessionLocal, create_tables, engine
 from app.db.seed import seed_database
 
 # Configure logging before anything else
@@ -66,7 +66,6 @@ async def lifespan(app: FastAPI):
         logger.info("Database tables ensured.")
 
     # Seed master data
-    from app.db.database import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
         await seed_database(db)
 
