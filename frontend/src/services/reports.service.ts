@@ -1,8 +1,13 @@
 /**
- * Reporting service.
- * Wraps /reports/* endpoints for Model Insights and Data History screens.
+ * reports.service.ts
+ *
+ * Handles all API communication for the Reporting module.
+ * Covers model summary, data history, dashboard KPIs, metadata fetching,
+ * and data-fact variable discovery.
+ * All responses are typed through the interfaces below.
  */
 import { api } from './api-client';
+import { MetaData } from '../utils/types';
 
 export interface ModelSummaryOut {
   cycle_id: string;
@@ -74,4 +79,24 @@ export const reportsService = {
 
   dashboard: (cycleId?: string) =>
     api.get<DashboardKPIs>(`/reports/dashboard${cycleId ? `?cycle_id=${cycleId}` : ''}`),
+
+  /**
+   * Fetch all MetaData rows for cascading filter dropdowns (Market, Brand, Indication).
+   * Frontend derives filtering logic from this flat list.
+   *
+   * @returns {Promise<MetaData[]>} Array of all metadata rows.
+   * @throws Will throw if the API request fails.
+   */
+  metadata: () => api.get<MetaData[]>('/reports/metadata'),
+
+  /**
+   * Fetch distinct variable values from DATA_FACT for a given cycle.
+   * Used to populate the searchable variable grid on the Target Variable selection screen.
+   *
+   * @param {string} cycleId - The cycle for which to fetch variables.
+   * @returns {Promise<string[]>} Sorted array of distinct variable names.
+   * @throws Will throw if the API request fails.
+   */
+  dataFactVariables: (cycleId: string) =>
+    api.get<string[]>(`/reports/data-fact-variables/${cycleId}`),
 };

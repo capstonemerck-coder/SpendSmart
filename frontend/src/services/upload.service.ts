@@ -16,21 +16,8 @@ import type {
   UploadHistoryParams,
   UploadPreview,
   UploadRecordSummary,
+  UploadResponse,
 } from '@/utils/types';
-
-// ── Legacy response types (DATA_FACT / MODEL_FACT) ───────────────────────────
-
-export interface UploadResponse {
-  upload_id: number;
-  cycle_id?: string;
-  is_datafile: boolean;
-  filename: string;
-  row_count: number;
-  status: 'success' | 'failed' | 'processing';
-  errors: Array<{ field: string; message: string; row?: number }>;
-  warnings: string[];
-  message: string;
-}
 
 // ── Cycle management ─────────────────────────────────────────────────────────
 
@@ -128,34 +115,43 @@ export const deleteUploadRecord = (uploadRecordId: number): Promise<void> =>
 /**
  * Uploads a DATA_FACT CSV or XLSX file directly.
  *
- * @param {File}   file    - The file to upload.
- * @param {string} cycleId - Optional cycle identifier.
+ * @param {File}            file       - The file to upload.
+ * @param {string}          cycleId    - Optional cycle identifier.
+ * @param {number}          metadataId - Optional metadata ID for Market/Brand/Indication context.
  * @returns {Promise<UploadResponse>} Upload result with row count and any errors.
  */
-export const uploadDataFact = (file: File, cycleId?: string): Promise<UploadResponse> => {
+export const uploadDataFact = (
+  file: File,
+  cycleId?: string,
+  metadataId?: number,
+): Promise<UploadResponse> => {
   const form = new FormData();
   form.append('file', file);
   if (cycleId) form.append('cycle_id', cycleId);
+  if (metadataId) form.append('metadata_id', String(metadataId));
   return api.postForm<UploadResponse>('/uploads/data-fact', form);
 };
 
 /**
  * Uploads a MODEL_FACT CSV or XLSX file directly.
  *
- * @param {File}   file           - The file to upload.
- * @param {string} cycleId        - Optional cycle identifier.
- * @param {string} targetVariable - Optional target variable override.
+ * @param {File}            file           - The file to upload.
+ * @param {string}          cycleId        - Optional cycle identifier.
+ * @param {string}          targetVariable - Optional target variable override.
+ * @param {number}          metadataId     - Optional metadata ID for Market/Brand/Indication context.
  * @returns {Promise<UploadResponse>} Upload result with row count and any errors.
  */
 export const uploadModelFact = (
   file: File,
   cycleId?: string,
   targetVariable?: string,
+  metadataId?: number,
 ): Promise<UploadResponse> => {
   const form = new FormData();
   form.append('file', file);
   if (cycleId) form.append('cycle_id', cycleId);
   if (targetVariable) form.append('target_variable', targetVariable);
+  if (metadataId) form.append('metadata_id', String(metadataId));
   return api.postForm<UploadResponse>('/uploads/model-fact', form);
 };
 

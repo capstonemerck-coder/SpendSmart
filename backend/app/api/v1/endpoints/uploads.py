@@ -52,6 +52,7 @@ _UPLOAD_ROLES = {"admin", "data scientist"}
 async def upload_data_fact(
     file: UploadFile = File(...),
     cycle_id: Optional[str] = Form(None),
+    metadata_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UploadResponse:
@@ -68,6 +69,7 @@ async def upload_data_fact(
         is_datafile=True,
         cycle_id=cycle_id,
         uploaded_by=current_user.user_id,
+        metadata_id=metadata_id,
     )
     return UploadResponse(**result)
 
@@ -83,6 +85,7 @@ async def upload_model_fact(
     file: UploadFile = File(...),
     cycle_id: Optional[str] = Form(None),
     target_variable: Optional[str] = Form(None),
+    metadata_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UploadResponse:
@@ -99,6 +102,8 @@ async def upload_model_fact(
         is_datafile=False,
         cycle_id=cycle_id,
         uploaded_by=current_user.user_id,
+        metadata_id=metadata_id,
+        target_variable=target_variable,
     )
     return UploadResponse(**result)
 

@@ -90,9 +90,20 @@ class UploadService:
         is_datafile: bool,
         cycle_id: Optional[str],
         uploaded_by: Optional[int],
+        metadata_id: Optional[int] = None,
+        target_variable: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Full upload pipeline.
+
+        Args:
+            file_bytes:       Raw file content.
+            filename:         Original filename.
+            is_datafile:      True for DATA_FACT, False for MODEL_FACT.
+            cycle_id:         Optional cycle identifier. If not provided, inferred from file.
+            uploaded_by:      User ID who performed the upload.
+            metadata_id:      Optional metadata ID for linking to Market/Brand/Indication context.
+            target_variable:  Optional target variable name (for MODEL_FACT uploads).
 
         Returns:
             Dict with upload_id, status, row_count, errors, warnings.
@@ -142,7 +153,7 @@ class UploadService:
 
         # ── Ensure cycle exists ────────────────────────────────────────────────
         if cycle_id:
-            await self._ensure_cycle(cycle_id)
+            await self._ensure_cycle(cycle_id, metadata_id)
 
         # ── Create upload audit record ─────────────────────────────────────────
         upload = Upload(
@@ -163,6 +174,8 @@ class UploadService:
                 await self._ingest_data_fact(df, upload.upload_id)
             else:
                 await self._ingest_model_fact(df, upload.upload_id)
+                if target_variable and cycle_id:
+                    await self._update_cycle_target_variable(cycle_id, target_variable)
 
             upload.status = "success"
             await self.db.flush()
@@ -303,12 +316,39 @@ class UploadService:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    async def _ensure_cycle(self, cycle_id: str) -> None:
+    async def _ensure_cycle(self, cycle_id: str, metadata_id: Optional[int] = None) -> None:
+        """
+        Create cycle if it doesn't exist. If metadata_id is provided, link it to the cycle.
+
+        Args:
+            cycle_id:    Cycle identifier.
+            metadata_id: Optional metadata ID to link (Market/Brand/Indication context).
+        """
         exists = await self.db.execute(
             select(CycleDef).where(CycleDef.cycle_id == cycle_id)
         )
-        if exists.scalar_one_or_none() is None:
-            self.db.add(CycleDef(cycle_id=cycle_id))
+        cycle = exists.scalar_one_or_none()
+        if cycle is None:
+            cycle = CycleDef(cycle_id=cycle_id, metadata_id=metadata_id)
+            self.db.add(cycle)
+        elif metadata_id and not cycle.metadata_id:
+            cycle.metadata_id = metadata_id
+        await self.db.flush()
+
+    async def _update_cycle_target_variable(self, cycle_id: str, target_variable: str) -> None:
+        """
+        Update the target_variable field on a CycleDef row.
+
+        Args:
+            cycle_id:         Cycle identifier.
+            target_variable:  Name of the target variable for this cycle.
+        """
+        result = await self.db.execute(
+            select(CycleDef).where(CycleDef.cycle_id == cycle_id)
+        )
+        cycle = result.scalar_one_or_none()
+        if cycle:
+            cycle.target_variable = target_variable
             await self.db.flush()
 
     async def _fail_upload(

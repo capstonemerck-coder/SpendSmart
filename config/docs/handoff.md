@@ -482,3 +482,69 @@ npm install && npm run dev
 **Why is MODEL_FACT not validated against a schema strictly?** Intentionally flexible — the external teams generating MMM outputs use different tools and column naming is not always perfectly standardized. The upload service validates required columns and types but accepts extra columns and doesn't fail on optional fields being null.
 
 **Why is the frontend not connected yet?** The frontend was built first from Figma-exported code, which came with fully working mock data and local state. Rather than partially wire it during the backend build (which would have broken the working UI), the service layer was written alongside but kept separate. The integration is the next clean phase of work.
+
+---
+
+## Session 2026-06-03 — Data Input Module Redesign
+
+### Changes Made
+
+**Backend:**
+- Added `GET /reports/metadata` endpoint returning all MetaData rows for cascading filter derivation
+- Added `GET /reports/data-fact-variables/{cycle_id}` endpoint returning distinct variable values from DATA_FACT
+- Updated `POST /uploads/data-fact` to accept optional `metadata_id` form field
+- Updated `POST /uploads/model-fact` to accept optional `metadata_id` form field
+- Modified `UploadService.process_upload()` to accept `metadata_id` and `target_variable` parameters
+- Enhanced `_ensure_cycle()` to link `metadata_id` to CycleDef on cycle creation
+- Added `_update_cycle_target_variable()` helper to persist target variable selection to CycleDef
+
+**Frontend:**
+- Created `FilterContext.tsx` — React Context for cascading Market → Brand → Indication filtering
+- Created `DrawerDataset.tsx` — standalone reusable table component with CSV export and pagination
+- Created `export.ts` — utility for exporting arrays to CSV format
+- Added new types to `types.ts`: `UploadError`, `UploadResponse`, `UploadHistoryRow`, `DataInputProps`, `MetaData`
+- Extended `reports.service.ts` with `metadata()` and `dataFactVariables()` methods
+- Updated `uploadDataFact()` and `uploadModelFact()` signatures in `upload.service.ts` to include `metadataId` parameter
+- **Rewrote `DataInput.tsx`** — replaced two-step parse/commit flow with 4-stage machine:
+  1. **raw-data**: Market/Brand/Indication dropdowns, optional Cycle ID (auto-populated and locked after DATA_FACT), DATA_FACT dropzone
+  2. **target-variable**: Searchable grid of predefined + custom variable selection
+  3. **model-output**: Locked cycle ID, MODEL_FACT dropzone
+  4. **complete**: Green gradient success panel with "View Data History" CTA
+- Created `DataInputContent.tsx` — implements the 4-stage machine logic (kept DataInput.tsx as FilterProvider wrapper)
+
+### Architectural Decisions
+
+1. **FilterContext scoping**: Filter state is provided at the DataInput page level only. This keeps the context lightweight and prevents scope creep to other modules.
+
+2. **Metadata resolution on selection**: Instead of separate API calls for each filter level, all MetaData is fetched once on FilterProvider mount. The frontend derives cascading options by filtering the flat list. This reduces API chattiness.
+
+3. **metadata_id as optional link**: metadata_id is optional in the backend (backward compatible) but required for upload in the frontend flow. The cycle is linked to metadata on DATA_FACT upload.
+
+4. **target_variable persistence**: target_variable is stored on CycleDef at MODEL_FACT upload time, not as a separate row. This keeps the schema simple and associates the variable with the cycle lifecycle.
+
+5. **Two-file model**: DataInput.tsx is a thin wrapper (FilterProvider injection). DataInputContent.tsx contains the 4-stage logic. This keeps the former under 50 lines and avoids deep nesting.
+
+### Testing Recommendations
+
+Before staging:
+- Manual test each stage: filter selection → DATA_FACT upload → variable selection → MODEL_FACT upload → completion
+- Verify metadata cascade behavior (Brand list empties when Market changes, etc.)
+- Test upload error paths: wrong file format, network failure, validation error
+- Verify CSV export from DrawerDataset preserves all columns and handles null values
+- Confirm cycle ID is locked and auto-populated after DATA_FACT upload
+- Test that non-admin users see read-only banner on raw-data stage
+
+### Known Limitations
+
+- No upload history modal / clock icon in this version (can be added as follow-up)
+- No template drawer (can be added as follow-up)
+- Progress indicator uses simple step numbers (can be enhanced with animations)
+- No field-level form validation messages (only top-level error banner)
+
+### Next Steps
+
+- Wire Data History screen to `reportsService.dataHistory(cycleId)`
+- Wire Model Summary to `reportsService.modelSummary(cycleId)`
+- Add upload history modal component
+- Add template / sample file drawer
+

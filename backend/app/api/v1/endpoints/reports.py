@@ -17,6 +17,7 @@ from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.models.models import (
     DataFact,
+    MetaData,
     ModelChannelCalculation,
     ModelFact,
     ScenarioHeader,
@@ -26,6 +27,7 @@ from app.models.models import (
 from app.schemas.schemas import (
     DashboardKPIs,
     DataFactOut,
+    MetaDataOut,
     ModelChannelCalcOut,
     ModelSummaryOut,
     PaginatedResponse,
@@ -208,3 +210,34 @@ async def dashboard_kpis(
         upload_count=upload_count,
         active_cycle_id=cycle_id,
     )
+
+
+@router.get("/metadata", response_model=List[MetaDataOut])
+async def get_metadata(
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> List[MetaDataOut]:
+    """
+    Return all MetaData rows for populating cascading filters (Market, Brand, Indication).
+    Frontend derives filtering logic from this flat list.
+    """
+    result = await db.execute(select(MetaData))
+    rows = list(result.scalars().all())
+    return [MetaDataOut.model_validate(r) for r in rows]
+
+
+@router.get("/data-fact-variables/{cycle_id}", response_model=List[str])
+async def get_data_fact_variables(
+    cycle_id: str,
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> List[str]:
+    """
+    Return distinct variable values from DATA_FACT for a given cycle.
+    Used to populate the searchable variable grid on the Target Variable selection screen.
+    """
+    result = await db.execute(
+        select(DataFact.variable).where(DataFact.cycle_id == cycle_id).distinct()
+    )
+    rows = list(result.scalars().all())
+    return sorted([r for r in rows if r])  # Filter out None, return sorted

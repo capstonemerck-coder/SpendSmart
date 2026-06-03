@@ -291,6 +291,196 @@ Do not duplicate loading or error UI across screens.
 
 ---
 
+## UI Design System
+
+All UI must use the CSS custom properties defined below. Never hardcode raw color values (hex, rgb) or arbitrary Tailwind colors (e.g. `text-blue-600`) for anything covered by this system. Always use the variable.
+
+### Color Tokens
+
+**Ink (text):**
+- `text-[var(--ink-900)]` — primary text, headings, labels
+- `text-[var(--ink-700)]` — secondary text, table cell content
+- `text-[var(--ink-600)]` — body descriptions
+- `text-[var(--ink-500)]` — muted/supporting text, placeholders
+- `text-[var(--ink-400)]` — disabled text, icons at rest
+
+**Brand:**
+- `text-[var(--brand)]` — primary brand color (links, active icons, highlights)
+- `text-[var(--brand-700)]` — darker brand for text on light brand backgrounds
+- `bg-[var(--brand-50)]` — lightest brand tint (hover backgrounds, selected states)
+- `border-[var(--brand)]` — brand-colored borders (active/selected states)
+- `border-[var(--brand-100)]` — subtle brand border
+- `border-[var(--brand-200)]` — medium brand border
+
+**Surfaces:**
+- `bg-[var(--surface-muted)]` — table row alternates, section backgrounds, empty zone fills
+- `bg-[var(--surface-subtle)]` — card footers, secondary panels, disabled inputs
+- `bg-white` — primary content surface
+
+**Borders:**
+- `border-[var(--border)]` — default divider and card border
+- `border-[var(--border-strong)]` — emphasized borders (dropzone outlines, inactive radio)
+
+**Semantic:**
+- `text-[var(--danger)]` — field-level validation errors
+
+### Semantic Color Usage (Non-Token)
+
+Use Tailwind semantic palette only for status indicators. Do not use these for structural UI.
+
+| Semantic state | Background | Border | Text |
+|---|---|---|---|
+| Success | `bg-green-50` / `from-green-50 to-emerald-50` | `border-green-200` | `text-green-700` / `text-green-900` |
+| Warning | `bg-amber-50` | `border-amber-200` | `text-amber-700` |
+| Error | `bg-red-50` | `border-red-200` | `text-red-700` / `text-red-900` |
+| Info | `bg-blue-50` | `border-blue-100` | `text-blue-700` |
+
+Icon containers for semantic states:
+- Success: `bg-green-500` with `text-white` icon, or `bg-green-100` with `text-green-600`
+- Error: `bg-red-100` with `text-red-600`
+- Warning: `bg-amber-100` with `text-amber-600`
+
+### Typography Scale
+
+| Use | Class |
+|---|---|
+| Page/section heading | `font-display text-[17px] font-semibold` |
+| Card section heading | `text-[16px] font-semibold` |
+| Body / primary label | `text-[15px] font-semibold` (labels), `text-[14px] font-semibold` (item names) |
+| Supporting body | `text-[13px]` |
+| Small / metadata | `text-[12.5px]` |
+| Caption / eyebrow | `text-[12px]` or `ui-eyebrow` utility class |
+| Micro | `text-[11.5px]` — table annotations, badge text |
+| Tag / badge | `text-[10px]` or `text-[9px]` for compact status labels |
+
+Use `font-mono` for identifiers, cycle IDs, and column names. Use `tabular-nums` for numeric columns in tables.
+
+### Spacing & Layout
+
+- Card internal sections: `px-6 py-5`
+- Card footer: `px-6 py-4`
+- Modal header: `px-6 py-5` (large modal) or `px-6 py-4` (compact)
+- Modal footer: `px-6 py-4`
+- Dense table cells: `px-4 py-2.5` (data) or `px-3 py-2.5` (compact)
+- Section separators inside a card: `divide-y divide-[var(--border)]`
+- Card border radius: `rounded-[12px]` or `rounded-xl`
+- Modal border radius: `rounded-2xl`
+
+### Interactive States
+
+**Dropzone:**
+```
+border-2 border-dashed rounded-xl p-10 transition-all
+```
+- Idle: `border-[var(--border-strong)] bg-[var(--surface-muted)]`
+- Drag active: `border-[var(--brand)] bg-[var(--brand-50)]`
+- Success: `border-green-500 bg-gradient-to-br from-green-50 to-emerald-50`
+- Error: `border-red-300 bg-red-50`
+
+**Selectable card / radio option:**
+```
+border rounded-lg px-4 py-3 transition-all
+```
+- Selected: `border-[var(--brand)] bg-[var(--brand-50)] shadow-sm`
+- Unselected: `border-[var(--border)] hover:border-[var(--ink-400)] bg-white`
+
+**Custom radio dot:**
+```
+w-4 h-4 rounded-full border-[1.5px] flex items-center justify-center
+```
+- Selected: `border-[var(--brand)]` with inner `w-2 h-2 rounded-full bg-[var(--brand)]`
+- Unselected: `border-[var(--border-strong)]`
+
+**Status / progress pill:**
+```
+flex items-center gap-2 px-3 py-1.5 rounded-md border text-[12.5px] font-medium transition-all
+```
+- Done: `text-green-700 bg-green-50 border-green-200`
+- Active: `text-[var(--brand-700)] bg-[var(--brand-50)] border-[var(--brand-200)]`
+- Pending: `text-[var(--ink-400)] bg-white border-[var(--border)]`
+
+**Inline status badge (text + icon):**
+- Success: `text-green-700` + `<CheckCircle size={12} />`
+- Failed: `text-red-600` + `<XCircle size={12} />`
+- Pending: `text-amber-700` + `<Clock size={12} />`
+
+### Icon Containers
+
+| Size | Shape | Usage |
+|---|---|---|
+| `w-8 h-8 rounded-lg` | Square with `rounded-lg` | Compact drawer / list item icons |
+| `w-10 h-10 rounded-full` | Circle | Mid-weight card icons |
+| `w-11 h-11 rounded-xl` | Rounded square | Feature step headers |
+| `w-12 h-12 rounded-full` | Circle | Card section empty/success states |
+| `w-14 h-14 rounded-full` | Circle | Dropzone primary state icons |
+
+Icon containers with gradient: `bg-gradient-to-br from-[color-500] to-[color-600]` with `shadow-md`.
+
+Default resting icon containers: `bg-white border border-[var(--border)] shadow-sm`.
+
+### Overlays & Modals
+
+- Backdrop: `fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4`
+- Backdrop with blur: add `backdrop-blur-sm` or `backdrop-blur-[1px]`
+- Modal container: `bg-white rounded-2xl shadow-xl w-full max-w-[Npx] max-h-[80vh] flex flex-col`
+- Side drawer: `fixed top-0 right-0 bottom-0 w-[560px] bg-white shadow-2xl z-50 flex flex-col`
+- Side drawer animation: `style={{ animation: 'slideInRight 0.3s ease-out' }}` with keyframe defined in component `<style>` block
+
+### Tables
+
+Header row: `bg-[var(--surface-subtle)] sticky top-0` (modal tables) or `bg-[var(--surface-muted)]` (inline tables)
+
+Header cell: `px-4 py-2.5 text-left ui-eyebrow text-[var(--ink-500)] font-semibold whitespace-nowrap`
+
+Data row: `border-b border-[var(--border)] hover:bg-[var(--surface-muted)]`
+
+Alternating rows (compact tables): `idx % 2 === 0 ? 'bg-white' : 'bg-[var(--surface-muted)]'` + `hover:bg-[var(--brand-50)]`
+
+### Tooltip Pattern
+
+Column header tooltips use CSS group-hover:
+
+```tsx
+<th className="... relative group">
+  <div className="flex items-center gap-1">
+    {columnName}
+    <Info size={11} className="text-[var(--ink-400)] opacity-0 group-hover:opacity-100 transition-opacity" />
+  </div>
+  <div className="absolute left-0 top-full mt-1 bg-[var(--ink-900)] text-white text-[10px] px-2.5 py-1.5 rounded-md shadow-xl z-30 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap max-w-[200px] leading-relaxed">
+    {tooltipText}
+  </div>
+</th>
+```
+
+### Inline Contextual Banners
+
+Use for in-page status messages (not toasts). Always `w-fit`.
+
+```
+flex items-center gap-2 text-[12px] px-3 py-1.5 rounded-md border w-fit
+```
+- Brand/resolved: `text-[var(--brand-700)] bg-[var(--brand-50)] border-[var(--brand-100)]`
+- Warning/incomplete: `text-amber-700 bg-amber-50 border-amber-200`
+- Info: `text-blue-700 bg-blue-50 border-blue-100`
+
+### Locked / Read-only Input
+
+When an input is locked after being auto-populated:
+```
+bg-[var(--surface-subtle)] text-[var(--ink-700)] cursor-not-allowed pr-9
+```
+Pair with a `<CheckCircle2 size={14} className="text-[var(--brand)]" />` icon absolutely positioned at `right-3 top-1/2 -translate-y-1/2` inside a `relative` wrapper. Always show a caption below explaining why it's locked.
+
+### Gradient Completion Panels
+
+For success/completion states inside cards:
+```
+bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6
+```
+Checklist items inside: `bg-white/60 px-4 py-2.5 rounded-lg border border-green-200/50`
+
+---
+
 ## Abstraction Rules
 
 Only abstract logic when:

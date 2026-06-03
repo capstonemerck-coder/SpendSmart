@@ -79,6 +79,48 @@ export interface PaginatedUploadHistory {
   total_pages: number;
 }
 
+/** Error detail in upload response. */
+export interface UploadError {
+  field: string;
+  message: string;
+  row: number | null;
+}
+
+/** Response from POST /uploads/data-fact or POST /uploads/model-fact. */
+export interface UploadResponse {
+  upload_id: number;
+  cycle_id: string | null;
+  is_datafile: boolean;
+  filename: string;
+  row_count: number;
+  status: 'success' | 'failed' | 'processing';
+  errors: UploadError[];
+  warnings: string[];
+  message: string;
+}
+
+/** History row for upload history drawer — extended from UploadRecordSummary. */
+export interface UploadHistoryRow extends UploadRecordSummary {
+  // Additional computed or UI-specific fields can be added here if needed
+}
+
+/** Props for DataInput component. */
+export interface DataInputProps {
+  // Intentionally minimal — DataInput.tsx owns most of its internal state
+  // This can be extended if parent provides initial cycle or metadata context
+}
+
+/** MetaData row for cascading filters (Market, Brand, Indication). */
+export interface MetaData {
+  metadata_id: number;
+  region: string | null;
+  market: string | null;
+  currency: string | null;
+  therapeutic_area: string | null;
+  brand: string | null;
+  indication: string | null;
+}
+
 // ============================================================================
 // Scenario types
 // ============================================================================
