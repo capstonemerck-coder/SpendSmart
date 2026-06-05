@@ -3,11 +3,20 @@
  *
  * Handles all API communication for the Reporting module.
  * Covers model summary, data history, dashboard KPIs, metadata fetching,
- * and data-fact variable discovery.
- * All responses are typed through the interfaces below.
+ * data-fact variable discovery, and all Data History screen endpoints
+ * (cycle listing, KPI summary, spend/revenue trends, channel breakdown).
+ * All responses are typed and normalized before being returned to hooks.
  */
 import { api } from './api-client';
-import { MetaData } from '../utils/types';
+import type {
+  MetaData,
+  DataHistoryKPI,
+  SpendTrendPoint,
+  RevenueTrendPoint,
+  ChannelBreakdownRow,
+  DataHistoryParams,
+  DataHistoryPage,
+} from '../utils/types';
 
 export interface ModelSummaryOut {
   cycle_id: string;
@@ -99,4 +108,86 @@ export const reportsService = {
    */
   dataFactVariables: (cycleId: string) =>
     api.get<string[]>(`/reports/data-fact-variables/${cycleId}`),
+
+  /**
+   * Fetch available cycle IDs, most recent first.
+   * Used to populate the cycle selector on the Data History screen.
+   *
+   * @param {number | null} metadataId - Optional metadata context filter.
+   * @returns {Promise<string[]>} Ordered list of cycle ID strings.
+   * @throws Will throw if the API request fails.
+   */
+  fetchAvailableCycles: (metadataId: number | null = null): Promise<string[]> => {
+    const qs = metadataId != null ? `?metadata_id=${metadataId}` : '';
+    return api.get<string[]>(`/reports/cycles${qs}`);
+  },
+
+  /**
+   * Fetch KPI summary (total sales, spend, reach) for a cycle.
+   *
+   * @param {string} cycleId - The cycle to summarize.
+   * @returns {Promise<DataHistoryKPI>} Aggregated KPI totals.
+   * @throws Will throw if the API request fails.
+   */
+  fetchKPISummary: (cycleId: string): Promise<DataHistoryKPI> =>
+    api.get<DataHistoryKPI>(`/reports/kpi-summary/${cycleId}`),
+
+  /**
+   * Fetch daily spend trend data for a cycle.
+   * Each point represents total spend across all channels for that date.
+   *
+   * @param {string} cycleId - The cycle to fetch trend for.
+   * @returns {Promise<SpendTrendPoint[]>} Chronologically ordered spend points.
+   * @throws Will throw if the API request fails.
+   */
+  fetchSpendTrend: (cycleId: string): Promise<SpendTrendPoint[]> =>
+    api.get<SpendTrendPoint[]>(`/reports/spend-trend/${cycleId}`),
+
+  /**
+   * Fetch daily revenue trend data for a cycle.
+   * Each point represents total value (sales) across all channels for that date.
+   *
+   * @param {string} cycleId - The cycle to fetch trend for.
+   * @returns {Promise<RevenueTrendPoint[]>} Chronologically ordered revenue points.
+   * @throws Will throw if the API request fails.
+   */
+  fetchRevenueTrend: (cycleId: string): Promise<RevenueTrendPoint[]> =>
+    api.get<RevenueTrendPoint[]>(`/reports/revenue-trend/${cycleId}`),
+
+  /**
+   * Fetch channel spend vs reach breakdown for a cycle.
+   * Returns rows sorted by efficiency ratio (reach/spend) descending.
+   *
+   * @param {string} cycleId - The cycle to analyze.
+   * @returns {Promise<ChannelBreakdownRow[]>} Per-channel breakdown sorted by ratio desc.
+   * @throws Will throw if the API request fails.
+   */
+  fetchChannelBreakdown: (cycleId: string): Promise<ChannelBreakdownRow[]> =>
+    api.get<ChannelBreakdownRow[]>(`/reports/channel-breakdown/${cycleId}`),
+
+  /**
+   * Fetch paginated DATA_FACT rows for a cycle.
+   * Normalizes the API's snake_case pagination keys to camelCase.
+   *
+   * @param {string} cycleId - The cycle to query.
+   * @param {DataHistoryParams} params - Pagination parameters (page, pageSize).
+   * @returns {Promise<DataHistoryPage>} Paginated result with normalized row array.
+   * @throws Will throw if the API request fails.
+   */
+  fetchDataHistory: (cycleId: string, params: DataHistoryParams): Promise<DataHistoryPage> => {
+    const qs = new URLSearchParams({
+      page: String(params.page),
+      page_size: String(params.pageSize),
+    });
+    return api
+      .get<{ total: number; page: number; page_size: number; items: any[] }>(
+        `/reports/data-history/${cycleId}?${qs}`,
+      )
+      .then((raw) => ({
+        total: raw.total,
+        page: raw.page,
+        pageSize: raw.page_size,
+        rows: raw.items,
+      }));
+  },
 };

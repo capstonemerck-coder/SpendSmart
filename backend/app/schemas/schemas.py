@@ -361,6 +361,35 @@ class DataFactOut(BaseModel):
     spend: Optional[float]
     reach: Optional[float]
     value: Optional[float]
+    upload_id: Optional[int] = None
+
+
+class DataHistoryKPIOut(BaseModel):
+    """KPI summary aggregated from DATA_FACT for the Data History screen."""
+    cycle_id: str
+    total_sales: float
+    total_spend: float
+    total_reach: float
+
+
+class SpendTrendPoint(BaseModel):
+    """A single chronological data point for the spend trend chart."""
+    date: str   # YYYY-MM-DD
+    spend: float
+
+
+class RevenueTrendPoint(BaseModel):
+    """A single chronological data point for the revenue trend chart."""
+    date: str   # YYYY-MM-DD
+    revenue: float
+
+
+class ChannelBreakdownRow(BaseModel):
+    """Per-channel spend and reach aggregation with efficiency ratio."""
+    channel: str
+    spend: float
+    reach: float
+    ratio: float   # reach / spend; 0.0 if spend is zero
 
 
 class PaginatedResponse(BaseModel):

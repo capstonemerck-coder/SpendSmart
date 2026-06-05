@@ -4,161 +4,148 @@
  * Manages cascading filter state for the Data Input module.
  * Supports Market → Brand → Indication filtering with metadata ID resolution.
  * Fetches all MetaData rows on mount and derives cascading options.
- * Exports both context and provider hook for scoped usage.
+ * Exports FilterProvider and useFilters hook for scoped usage.
  */
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { reportsService } from '@/services/reports.service';
 import type { MetaData } from '@/utils/types';
 
-interface FilterContextValue {
-  // Data
-  metadata: MetaData[];
-  isLoading: boolean;
-  error: string | null;
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-  // Cascading filter state
-  selectedMarket: string | null;
-  selectedBrand: string | null;
-  selectedIndication: string | null;
-  selectedMetadataId: number | null;
+interface Filters {
+  market: string | null;
+  brand: string | null;
+  indication: string | null;
+  metadataId: number | null;
+}
 
-  // Setters
-  setSelectedMarket: (market: string | null) => void;
-  setSelectedBrand: (brand: string | null) => void;
-  setSelectedIndication: (indication: string | null) => void;
+export interface IndicationOption {
+  indication: string;
+  metadata_id: number;
+}
 
-  // Derived lists for dropdowns
+interface Options {
   markets: string[];
   brands: string[];
-  indications: string[];
+  indications: IndicationOption[];
+  marketsLoading: boolean;
+  brandsLoading: boolean;
+  indicationsLoading: boolean;
+}
+
+interface FilterContextValue {
+  filters: Filters;
+  options: Options;
+  setMarket: (value: string | null) => void;
+  setBrand: (value: string | null) => void;
+  setIndication: (value: string | null, metadataId: number | null) => void;
 }
 
 const FilterContext = createContext<FilterContextValue | undefined>(undefined);
 
+// ── Provider ──────────────────────────────────────────────────────────────────
+
 /**
- * Provider component for Filter context. Wraps the Data Input module.
- * Fetches metadata on mount and manages cascading filter state.
+ * FilterProvider
+ *
+ * Fetches all metadata on mount and manages cascading Market → Brand → Indication
+ * state. Each setter resets downstream selections. Must wrap any component
+ * that calls useFilters().
  */
 export const FilterProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [metadata, setMetadata] = useState<MetaData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
-  const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
-  const [selectedIndication, setSelectedIndication] = useState<string | null>(null);
-  const [selectedMetadataId, setSelectedMetadataId] = useState<number | null>(null);
+  const [market, setMarketState]         = useState<string | null>(null);
+  const [brand, setBrandState]           = useState<string | null>(null);
+  const [indication, setIndicationState] = useState<string | null>(null);
+  const [metadataId, setMetadataId]      = useState<number | null>(null);
 
-  // Fetch all metadata on mount
   useEffect(() => {
-    const fetchMetadata = async () => {
+    const load = async () => {
       try {
         setIsLoading(true);
-        const data = await reportsService.metadata();
-        setMetadata(data);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch metadata');
+        setMetadata(await reportsService.metadata());
+      } catch {
         setMetadata([]);
       } finally {
         setIsLoading(false);
       }
     };
-
-    fetchMetadata();
+    load();
   }, []);
 
-  // Derive unique market list
+  // Derive cascading lists from flat metadata array
   const markets = Array.from(
     new Set(metadata.filter((m) => m.market).map((m) => m.market!)),
   ).sort();
 
-  // Derive brand list for selected market
-  const brands = selectedMarket
+  const brands = market
     ? Array.from(
-        new Set(
-          metadata
-            .filter((m) => m.market === selectedMarket && m.brand)
-            .map((m) => m.brand!),
-        ),
+        new Set(metadata.filter((m) => m.market === market && m.brand).map((m) => m.brand!)),
       ).sort()
     : [];
 
-  // Derive indication list for selected market + brand
-  const indications = selectedMarket && selectedBrand
-    ? Array.from(
-        new Set(
-          metadata
-            .filter(
-              (m) =>
-                m.market === selectedMarket &&
-                m.brand === selectedBrand &&
-                m.indication,
-            )
-            .map((m) => m.indication!),
-        ),
-      ).sort()
+  const indications: IndicationOption[] = market && brand
+    ? metadata
+        .filter((m) => m.market === market && m.brand === brand && m.indication)
+        .map((m) => ({ indication: m.indication!, metadata_id: m.metadata_id }))
+        .filter((v, i, arr) => arr.findIndex((x) => x.indication === v.indication) === i)
+        .sort((a, b) => a.indication.localeCompare(b.indication))
     : [];
 
-  // Resolve metadata ID when all three filters are selected
-  useEffect(() => {
-    if (selectedMarket && selectedBrand && selectedIndication) {
-      const row = metadata.find(
-        (m) =>
-          m.market === selectedMarket &&
-          m.brand === selectedBrand &&
-          m.indication === selectedIndication,
-      );
-      setSelectedMetadataId(row?.metadata_id || null);
-    } else {
-      setSelectedMetadataId(null);
-    }
-  }, [selectedMarket, selectedBrand, selectedIndication, metadata]);
+  // Setters cascade: market reset clears brand + indication, brand reset clears indication
 
-  // Reset brand and indication when market changes
-  const handleMarketChange = (market: string | null) => {
-    setSelectedMarket(market);
-    setSelectedBrand(null);
-    setSelectedIndication(null);
+  const setMarket = (value: string | null) => {
+    setMarketState(value);
+    setBrandState(null);
+    setIndicationState(null);
+    setMetadataId(null);
   };
 
-  // Reset indication when brand changes
-  const handleBrandChange = (brand: string | null) => {
-    setSelectedBrand(brand);
-    setSelectedIndication(null);
+  const setBrand = (value: string | null) => {
+    setBrandState(value);
+    setIndicationState(null);
+    setMetadataId(null);
+  };
+
+  const setIndication = (value: string | null, mid: number | null) => {
+    setIndicationState(value);
+    setMetadataId(mid);
   };
 
   const value: FilterContextValue = {
-    metadata,
-    isLoading,
-    error,
-    selectedMarket,
-    selectedBrand,
-    selectedIndication,
-    selectedMetadataId,
-    setSelectedMarket: handleMarketChange,
-    setSelectedBrand: handleBrandChange,
-    setSelectedIndication,
-    markets,
-    brands,
-    indications,
+    filters: { market, brand, indication, metadataId },
+    options: {
+      markets,
+      brands,
+      indications,
+      // Single metadata fetch means all three loading states share the same flag
+      marketsLoading: isLoading,
+      brandsLoading: isLoading,
+      indicationsLoading: isLoading,
+    },
+    setMarket,
+    setBrand,
+    setIndication,
   };
 
-  return (
-    <FilterContext.Provider value={value}>{children}</FilterContext.Provider>
-  );
+  return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>;
 };
 
+// ── Hook ──────────────────────────────────────────────────────────────────────
+
 /**
- * Hook to access FilterContext. Must be used within a FilterProvider.
+ * useFilters
  *
- * @returns {FilterContextValue} Filter state and setters.
+ * Returns the FilterContext value with cascading filter state, derived option
+ * lists, and setter functions. Must be used within a FilterProvider.
+ *
+ * @returns {FilterContextValue} Filter state, dropdown options, and setters.
  * @throws Will throw if used outside FilterProvider.
  */
 export const useFilters = (): FilterContextValue => {
   const context = useContext(FilterContext);
-  if (!context) {
-    throw new Error('useFilters must be used within a FilterProvider');
-  }
+  if (!context) throw new Error('useFilters must be used within a FilterProvider');
   return context;
 };

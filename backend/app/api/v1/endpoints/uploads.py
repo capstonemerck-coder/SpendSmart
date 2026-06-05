@@ -10,7 +10,7 @@ Channel Parameter (two-step parse/commit):
   POST /api/v1/uploads/commit        → commit parsed upload, making data active (Admin, Data Scientist)
 
 Upload history:
-  GET  /api/v1/uploads               → paginated upload history (all authenticated)
+  GET  /api/v1/uploads               → upload history list (all authenticated)
   GET  /api/v1/uploads/{id}          → single upload record (all authenticated)
   DELETE /api/v1/uploads/{id}        → delete upload record + cascade (Admin only)
 """
@@ -28,7 +28,7 @@ from app.core.exceptions import AuthorizationError, NotFoundError, UploadError
 from app.db.database import get_db
 from app.models.models import Upload, User
 from app.schemas.schemas import (
-    PaginatedUploads, UploadCommitIn, UploadOut, UploadPreviewOut, UploadResponse,
+    UploadCommitIn, UploadOut, UploadPreviewOut, UploadResponse,
 )
 from app.services import upload_service as svc
 from app.services.upload_service import UploadService
@@ -168,30 +168,18 @@ async def commit_channel_params(
 
 @router.get(
     "",
-    response_model=PaginatedUploads,
+    response_model=List[UploadOut],
     summary="List upload history",
-    description="Returns a paginated list of upload records. Supports filtering by cycle, "
-                "status, and upload type. Accessible to all authenticated users.",
+    description="Returns upload records ordered by most recent first. "
+                "Accessible to all authenticated users.",
 )
 async def list_uploads(
-    cycle_id: Optional[str] = None,
-    status: Optional[str] = None,
-    upload_type: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> PaginatedUploads:
-    """Return paginated upload history with optional filters."""
-    return await svc.get_upload_history(
-        db=db,
-        cycle_id=cycle_id,
-        status=status,
-        upload_type=upload_type,
-        page=max(1, page),
-        page_size=min(100, max(1, page_size)),
-    )
-
+) -> List[UploadOut]:
+    """Return upload history as a flat list ordered by uploaded_at descending."""
+    result = await svc.get_upload_history(db=db)
+    return result.records
 
 @router.get(
     "/{upload_id}",

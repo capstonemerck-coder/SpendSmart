@@ -14,6 +14,7 @@ import type {
   CycleSummary,
   PaginatedUploadHistory,
   UploadHistoryParams,
+  UploadHistoryRow,
   UploadPreview,
   UploadRecordSummary,
   UploadResponse,
@@ -159,6 +160,27 @@ export const uploadModelFact = (
 export const uploadService = {
   uploadDataFact,
   uploadModelFact,
+
+  /**
+   * Fetches upload history records ordered by most recent first.
+   *
+   * @returns {Promise<UploadHistoryRow[]>} Flat list of upload records.
+   * @throws Will throw if the API request fails.
+   */
+  fetchUploadHistory: (): Promise<UploadHistoryRow[]> =>
+    api.get<UploadHistoryRow[]>('/uploads'),
+
+  /**
+   * Fetches distinct variable values from DATA_FACT rows for a given cycle.
+   * Used to populate the target variable selection step.
+   *
+   * @param {string} cycleId - The cycle to fetch variables for.
+   * @returns {Promise<string[]>} Sorted list of distinct variable names.
+   * @throws Will throw if the API request fails.
+   */
+  fetchDataFactVariables: (cycleId: string): Promise<string[]> =>
+    api.get<string[]>(`/reports/data-fact-variables/${cycleId}`),
+
   list: (cycleId?: string, isDatafile?: boolean) => {
     const params = new URLSearchParams();
     if (cycleId) params.append('cycle_id', cycleId);

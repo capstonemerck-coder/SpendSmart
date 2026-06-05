@@ -121,6 +121,51 @@ export interface MetaData {
   indication: string | null;
 }
 
+// ── Data History ──────────────────────────────────────────────────────────────
+
+export interface DataHistoryKPI {
+  cycle_id: string;
+  total_sales: number;
+  total_spend: number;
+  total_reach: number;
+}
+
+export interface SpendTrendPoint { date: string; spend: number; }
+export interface RevenueTrendPoint { date: string; revenue: number; }
+
+export interface ChannelBreakdownRow {
+  channel: string;
+  spend: number;
+  reach: number;
+  ratio: number;
+}
+
+export interface DataFactRow {
+  id: number;
+  cycle_id: string;
+  date: string | null;
+  category: string | null;
+  channel: string | null;
+  sub_channel: string | null;
+  variable: string | null;
+  spend: number | null;
+  reach: number | null;
+  value: number | null;
+  upload_id: number | null;
+}
+
+export interface DataHistoryParams {
+  page: number;
+  pageSize: number;
+}
+
+export interface DataHistoryPage {
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: DataFactRow[];
+}
+
 // ============================================================================
 // Scenario types
 // ============================================================================

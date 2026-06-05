@@ -543,8 +543,146 @@ Before staging:
 
 ### Next Steps
 
-- Wire Data History screen to `reportsService.dataHistory(cycleId)`
 - Wire Model Summary to `reportsService.modelSummary(cycleId)`
-- Add upload history modal component
-- Add template / sample file drawer
+
+---
+
+## Data History Module — Session 2026-06-05
+
+### What was built
+
+Complete end-to-end Data History module. Allows analysts to review KPI totals (sales, spend,
+reach), spend and revenue trends as line charts, a channel efficiency breakdown table, and raw
+DATA_FACT rows with pagination and export for any uploaded cycle.
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `frontend/src/hooks/useDataHistory.ts` | All state and handlers for the Data History screen: cycle selection, KPI/trend fetching, dataset table pagination, CSV export |
+| `frontend/src/components/shared/charts/ChannelBreakdown.tsx` | Filterable, paginated channel efficiency table with inline spend/reach bars and Top/Low badges |
+| `frontend/src/components/shared/data/ExportButtons.tsx` | Reusable export button — single-button (CSV) or dropdown (PNG + CSV + both) variants |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `backend/app/schemas/schemas.py` | Added `DataHistoryKPIOut`, `SpendTrendPoint`, `RevenueTrendPoint`, `ChannelBreakdownRow`; added `upload_id` field to `DataFactOut` |
+| `backend/app/api/v1/endpoints/reports.py` | Added 5 new endpoints: `GET /cycles`, `GET /kpi-summary/{cycle_id}`, `GET /spend-trend/{cycle_id}`, `GET /revenue-trend/{cycle_id}`, `GET /channel-breakdown/{cycle_id}`; moved `CycleDef` import to top-level |
+| `frontend/src/utils/types.ts` | Added `DataHistoryKPI`, `SpendTrendPoint`, `RevenueTrendPoint`, `ChannelBreakdownRow`, `DataFactRow`, `DataHistoryParams`, `DataHistoryPage` under `// ── Data History ──` |
+| `frontend/src/services/reports.service.ts` | Added `fetchAvailableCycles`, `fetchKPISummary`, `fetchSpendTrend`, `fetchRevenueTrend`, `fetchChannelBreakdown`, `fetchDataHistory`; updated module-level comment and imports |
+| `frontend/src/pages/DataHistory.tsx` | Complete rewrite: replaced upload-history table with KPI cards, trend charts (Recharts LineChart), channel breakdown, and lazy-loaded DATA_FACT table |
+
+### Architectural decisions
+
+**Why KPI, trend, and breakdown are fetched in parallel:** All four requests (KPI + 3 trend/breakdown)
+are issued together via `Promise.all` when a cycle is selected. This avoids sequential waterfall
+latency. If any fails, all sections degrade together (a single error state covers the whole call).
+
+**Why `tableOpen` triggers lazy row fetch:** DATA_FACT tables can be large. Rows are never fetched
+unless the user explicitly clicks "View data". The `useEffect` in `useDataHistory` watches `tableOpen`
+and `fetchRows` (stable via `useCallback`); when the table opens, the first fetch runs automatically.
+
+**Why `ChannelBreakdown` is a self-contained component with internal filter state:** The three
+filter dimensions (category, performance, page) are only relevant within the channel breakdown view.
+Hoisting them into `useDataHistory` would add state the hook has no use for when other tabs are active.
+
+**Why `ExportButtons` uses `onBlur` with `setTimeout` instead of a click-outside handler:**
+The `onBlur` + 150ms delay pattern closes the dropdown reliably without requiring a global
+`document` event listener or a `useEffect` cleanup. The 150ms gap lets click events on menu
+items fire before the blur handler closes the menu.
+
+**Why the dataset table pagination shows at most 7 page buttons:** For cycles with many rows,
+rendering hundreds of page buttons would overflow the footer. The `Math.min(totalPages, 7)` cap
+keeps the footer compact. A full prev/next + jump pattern can be added if pagination depth grows.
+
+**Why `DataFactOut` was extended with `upload_id`:** The dataset table requires `upload_id` to
+let analysts trace which upload ingested a given row. The field is `Optional[int]` and `None` for
+any rows that predate the `upload_id` foreign key. Backward compatible — no existing callers break.
+
+### Known issues / TODO before staging
+
+- **PNG export is a no-op:** The `ExportButtons` dropdown exposes a PNG option but `onExportPNG`
+  is not wired to a chart-to-image library. Implementing requires `html2canvas` or Recharts' own
+  export utilities targeting a `<div ref>`. Can be added as a follow-up.
+- **Cycle selector shows all cycles, not filtered by metadata:** `fetchAvailableCycles(null)` fetches
+  all cycles. If analysts belong to a specific brand context (from FilterContext), `metadata_id` should
+  be passed to narrow the list. Add a `metadataId` prop or consume FilterContext if needed.
+- **Channel breakdown category mapping is static:** `CHANNEL_CATEGORIES` is a hardcoded map inside
+  `ChannelBreakdown.tsx`. If channel names change in the data, the map needs to be updated manually.
+  Future work: derive categories from the ChannelHierarchy table via a new API endpoint.
+- **Pagination shows first 7 pages only:** For cycles with more than 70 rows, pages 8+ require
+  clicking "Previous"/"Next" manually. Add a full prev/next pagination strip if needed.
+
+### What the next module (Model Summary) will need from this module
+
+- **Cycle selector pattern:** Model Summary needs the same `GET /reports/cycles` endpoint to
+  populate its cycle selector. The `reportsService.fetchAvailableCycles` method is ready to reuse.
+- **FilterContext for metadata context:** If Model Summary should pre-filter to the user's selected
+  brand context, it should consume `FilterContext.filters.metadataId` and pass it to
+  `fetchAvailableCycles(metadataId)` to narrow cycles to the relevant brand.
+
+---
+
+## Data Input Module — Refactor 2026-06-04
+
+### What was done
+
+Refactored the Data Input module to match `DataInputRoopa.tsx` (the UX reference design)
+while enforcing full CLAUDE.md architecture compliance.
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `frontend/src/hooks/useDataInputUpload.ts` | Upload state machine hook: all upload state, handlers, derived values. No API calls inside DataInputContent. |
+| `frontend/src/components/shared/data/TemplateDrawer.tsx` | Slide-in drawer with DATA_FACT and MODEL_FACT schema previews and formatting guidelines |
+| `frontend/src/components/shared/modals/UploadHistoryModal.tsx` | Self-contained upload history modal (fetches its own data via uploadService.fetchUploadHistory) |
+| `frontend/src/components/shared/modals/EmptyDatasetModal.tsx` | Warning modal for empty file uploads |
+| `frontend/src/components/shared/modals/WrongFormatModal.tsx` | Error modal with column structure comparison |
+| `frontend/src/pages/DataInputTargetVariableStep.tsx` | Target variable selection step component (stage 2 of upload flow) |
+| `frontend/src/pages/DataInputUploadSection.tsx` | Upload section component: file type cards + 5-state dropzone |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `frontend/src/context/FilterContext.tsx` | Reshaped to expose `{ filters, options, setMarket, setBrand, setIndication }` — matching Roopa's interface. `indications` now returns `{ indication, metadata_id }[]` objects instead of strings. |
+| `frontend/src/services/upload.service.ts` | Added `fetchUploadHistory()` (flat list, no params) and `fetchDataFactVariables(cycleId)` to the `uploadService` object. |
+| `frontend/src/components/shared/data/DrawerDataset.tsx` | Replaced paginated data-table component with template-preview component matching Roopa's `DrawerDatasetProps`. |
+| `frontend/src/pages/DataInputContent.tsx` | Complete rewrite: 1103 lines → 298 lines. Delegates upload logic to `useDataInputUpload`, renders extracted components. No inline types, no direct API calls. |
+| `frontend/src/pages/DataInput.tsx` | Updated to accept and pass through `onNavigate` and `onUploadComplete` props. |
+
+### Files deleted
+
+- `DataInputRoopa.tsx` — reference design, no longer needed.
+
+### Architectural decisions
+
+**Why `useDataInputUpload` is a hook, not split further:** The upload state machine has tight internal
+dependencies (handleSubmit advances stages, sets cycleIdLocked, triggers dataFactVariables fetch). Splitting
+into smaller hooks would require awkward prop passing between them. A single hook returning a flat object
+is the cleanest boundary.
+
+**Why `UploadHistoryModal` is self-contained:** The modal fetches its own data on open and handles
+refresh internally. This removes history fetch state from DataInputContent, which otherwise has no use
+for the history data outside the modal.
+
+**Why `FilterContext` uses a single `isLoading` state for all three dropdowns:** All metadata is loaded
+in a single API call on mount. Per-dropdown loading states would never differ. The three `marketsLoading /
+brandsLoading / indicationsLoading` booleans are exposed for API compatibility but all resolve to the
+same value.
+
+**Why `DrawerDataset` was replaced rather than renamed:** The existing `DrawerDataset.tsx` was scaffolded
+but not imported by any page. The template-preview version (collapsible, with tooltips and download) is the
+only use case in the codebase. No regressions from the replacement.
+
+### Known issues / TODO before staging
+
+- `showEmptyModal` and `showErrorModal` visibility states in DataInputContent are never set to `true` by
+  the current upload flow — they are wired up and ready but the trigger conditions (empty file detected,
+  wrong columns) need to be detected and surfaced from `handleSubmit` in `useDataInputUpload`.
+- The existing `DrawerDataset.tsx` was a more complex paginated data-table component (with expand-rows).
+  If DataHistory needs a reusable paginated table, create `DataTablePaginated.tsx` rather than restoring
+  the old DrawerDataset.
 
