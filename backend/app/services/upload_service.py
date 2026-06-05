@@ -151,13 +151,18 @@ class UploadService:
                 f"{orig_len - len(df)} duplicate rows removed."
             )
 
-        # ── Ensure cycle exists ────────────────────────────────────────────────
-        if cycle_id:
-            await self._ensure_cycle(cycle_id, metadata_id)
+        # ── Resolve cycle_id — use passed value or auto-detect from file ────────
+        resolved_cycle_id = cycle_id or (
+            str(df["cycle_id"].iloc[0]) if "cycle_id" in df.columns and not df.empty else None
+        )
+
+        # ── Ensure cycle exists in cycle_def before Upload references it ────────
+        if resolved_cycle_id:
+            await self._ensure_cycle(resolved_cycle_id, metadata_id)
 
         # ── Create upload audit record ─────────────────────────────────────────
         upload = Upload(
-            cycle_id=cycle_id or df["cycle_id"].iloc[0] if "cycle_id" in df.columns else None,
+            cycle_id=resolved_cycle_id,
             is_datafile=is_datafile,
             filename=filename,
             file_size_bytes=len(file_bytes),
