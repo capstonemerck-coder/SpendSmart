@@ -1,6 +1,7 @@
 // app.tsx — Root application shell
 import { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { FilterProvider } from '@/context/FilterContext';
 import { NavBar } from '@/components/shared/layout/NavBar';
 import { FilterBar } from '@/components/shared/layout/FilterBar';
 import UnauthorizedScreen from '@/components/shared/layout/UnauthorizedScreen';
@@ -68,7 +69,6 @@ function AppShell() {
   }
 
   // ── Logged-out state: show landing page ──────────────────────────────────
-  // Landing manages its own login button and LoginModal.
   if (!currentUser) {
     return <LandingPage />;
   }
@@ -138,13 +138,18 @@ function AppShell() {
           if (tab !== 'SCENARIO OUTCOME') setActiveOutcomeScenarioId(null);
         }}
       />
-      {showFilterBar.includes(activeTab) && (
-        <FilterBar
-          showScenarioFilter={activeTab === 'SCENARIO OUTCOME'}
-          scenarioOptions={savedScenarios.map((s) => s.name)}
-        />
-      )}
-      {renderScreen()}
+      {/* FilterProvider wraps both FilterBar and all screens so Market/Brand/Indication
+          selections made in FilterBar are immediately visible to screen content (e.g.
+          DataHistory reads filters.metadataId) and persist across tab navigation. */}
+      <FilterProvider>
+        {showFilterBar.includes(activeTab) && (
+          <FilterBar
+            showScenarioFilter={activeTab === 'SCENARIO OUTCOME'}
+            scenarioOptions={savedScenarios.map((s) => s.name)}
+          />
+        )}
+        {renderScreen()}
+      </FilterProvider>
     </div>
   );
 }

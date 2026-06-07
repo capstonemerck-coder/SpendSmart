@@ -1,10 +1,11 @@
 """
 Reporting endpoints — Model Insights, Data History, and Dashboard screens.
 
-GET /api/v1/reports/model-summary/{cycle_id}       → Model Insights KPIs + channel table
-GET /api/v1/reports/data-history/{cycle_id}        → DATA_FACT rows (paginated)
-GET /api/v1/reports/dashboard                      → Homepage KPI cards
-GET /api/v1/reports/metadata                       → All MetaData rows for cascading filters
+GET /api/v1/reports/model-summary              → Model Summary by market/brand/indication
+GET /api/v1/reports/model-summary/{cycle_id}   → Model Insights KPIs + channel table (legacy)
+GET /api/v1/reports/data-history/{cycle_id}    → DATA_FACT rows (paginated)
+GET /api/v1/reports/dashboard                  → Homepage KPI cards
+GET /api/v1/reports/metadata                   → All MetaData rows for cascading filters
 GET /api/v1/reports/data-fact-variables/{cycle_id} → Distinct variable values in DATA_FACT
 
 Data History endpoints:
@@ -16,7 +17,7 @@ GET /api/v1/reports/channel-breakdown/{cycle_id}   → Per-channel spend/reach/r
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -48,6 +49,65 @@ from app.schemas.schemas import (
 )
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+@router.get(
+    "/model-summary",
+    summary="Fetch model summary by market/brand/indication",
+    description=(
+        "Returns channel/subchannel ROI parameters and the calculated baseline KPI "
+        "for the most recently committed channel parameter upload that matches the "
+        "given market, brand, and indication. Returns data: null when no matching "
+        "data exists — never raises 404 for missing data."
+    ),
+)
+async def get_model_summary_by_filter(
+    market: str = Query(..., min_length=1, description="Market name from META_DATA"),
+    brand: str = Query(..., min_length=1, description="Brand name from META_DATA"),
+    indication: str = Query(..., min_length=1, description="Indication from META_DATA"),
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Return model summary data for the given market/brand/indication combination.
+
+    Resolution chain: MetaData → most recent CycleDef → most recent successful
+    channel_params Upload → ChannelParameter + SubchannelParameter rows.
+
+    current_spend per subchannel is sourced from DATA_FACT when available,
+    falling back to SubchannelParameter.min_spend.  baseline_kpi is computed
+    as sum(current_spend × roi_coefficient) across all subchannels.
+
+    Args:
+        market:     Market name from MetaData.
+        brand:      Brand name from MetaData.
+        indication: Indication name from MetaData.
+
+    Returns:
+        Standard response envelope.  data is ModelSummaryDataSchema when found,
+        or null when no matching channel parameter upload exists.
+    """
+    from app.services.reports_service import get_model_summary
+
+    result = await get_model_summary(
+        market=market,
+        brand=brand,
+        indication=indication,
+        db=db,
+    )
+
+    if result is None:
+        return {
+            "success": True,
+            "data": None,
+            "message": "No model data found for the selected filters.",
+        }
+
+    return {
+        "success": True,
+        "data": result.model_dump(),
+        "message": "",
+    }
 
 
 @router.get("/model-summary/{cycle_id}", response_model=ModelSummaryOut)

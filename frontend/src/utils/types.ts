@@ -121,6 +121,44 @@ export interface MetaData {
   indication: string | null;
 }
 
+// ─── Model Summary ────────────────────────────────────────────────────────────
+
+/** Per-subchannel row returned by GET /reports/model-summary. */
+export interface SubChannelSummary {
+  channel: string;
+  subChannel: string;
+  roiCoefficient: number;
+  /**
+   * Actual spend from DATA_FACT (sum over cycle for this channel/subchannel).
+   * Falls back to SubchannelParameter.min_spend when no DATA_FACT rows exist.
+   */
+  currentSpend: number;
+  minSpend: number;
+  maxSpend: number;
+}
+
+/** Normalized response from GET /reports/model-summary. */
+export interface ModelSummaryData {
+  baselineKpi: number;
+  channels: SubChannelSummary[];
+  cycleId: string;
+  uploadedAt: string;
+  /** Sum of currentSpend across all subchannels. */
+  totalSpend: number;
+  /** totalIncrementalSales + totalBaseSales. */
+  totalSales: number;
+  /** totalIncrementalSales / totalSpend; 0 when totalSpend is 0. */
+  overallRoi: number;
+  /** Sum of SubchannelParameter.base_sales; 0 when not from MODEL_FACT. */
+  totalBaseSales: number;
+  /** Sum of (currentSpend × roiCoefficient) — same value as baselineKpi. */
+  totalIncrementalSales: number;
+  /** totalBaseSales / totalSales × 100; 0 when totalSales is 0. */
+  basePct: number;
+  /** totalIncrementalSales / totalSales × 100; 100 when totalSales is 0. */
+  incrementalPct: number;
+}
+
 // ── Data History ──────────────────────────────────────────────────────────────
 
 export interface DataHistoryKPI {

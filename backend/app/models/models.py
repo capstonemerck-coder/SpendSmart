@@ -437,6 +437,9 @@ class ChannelParameter(Base):
     Linked to an Upload record (status tracks whether the upload is committed).
     Downstream modules (scenario planning, optimizer) read from records whose
     linked Upload.status = 'success'.
+
+    category and variable are sourced from MODEL_FACT uploads. They are null
+    for rows created by channel_params uploads, which do not carry these fields.
     """
     __tablename__ = "channel_parameter"
 
@@ -451,6 +454,12 @@ class ChannelParameter(Base):
     roi_coefficient: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
     min_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
     max_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
+    category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Audience segment this channel targets (e.g. HCP-PP, HCP-NPP, Consumers).
+    # Sourced from the category column in MODEL_FACT uploads.
+    variable: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Target KPI variable this channel models (e.g. nrx, trx, sales).
+    # Sourced from the variable column in MODEL_FACT uploads.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -467,7 +476,16 @@ class SubchannelParameter(Base):
     SUBCHANNEL_PARAMETER — per-subchannel MMM parameters.
 
     One row per subchannel, child of ChannelParameter.
-    These are the atomic rows from the uploaded channel parameter file.
+    These are the atomic rows from the uploaded channel parameter or MODEL_FACT file.
+
+    The MMM coefficient columns (estimate, curve_type, curvature, adstock_rate,
+    adstock_horizon, p_value, impactable_sales_pct, base_sales) are populated only
+    when the parent upload is of type 'model_fact'. They remain null for rows
+    created by channel_params uploads.
+
+    estimate is stored separately from roi_coefficient to preserve the original
+    MODEL_FACT field name and allow future divergence between the model estimate
+    and the applied ROI coefficient.
     """
     __tablename__ = "subchannel_parameter"
 
@@ -479,6 +497,27 @@ class SubchannelParameter(Base):
     roi_coefficient: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
     min_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
     max_spend: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False)
+    category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Audience segment. Mirrors the parent channel's category value from MODEL_FACT.
+    variable: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Target KPI variable (e.g. nrx, trx, sales). From MODEL_FACT uploads.
+    estimate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    # Raw MMM model coefficient from MODEL_FACT. Stored alongside roi_coefficient
+    # to preserve the original field name for future divergence.
+    curve_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Response curve type (e.g. adstock, s_curve, diminishing_returns).
+    curvature: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    # Shape parameter controlling curve steepness.
+    adstock_rate: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    # Decay rate for adstock transformation. Range 0–1.
+    adstock_horizon: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Number of periods over which adstock carry-over applies.
+    p_value: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    # Statistical significance of the estimate. Lower is more significant.
+    impactable_sales_pct: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    # Percentage of total impactable sales attributed to this subchannel.
+    base_sales: Mapped[Optional[float]] = mapped_column(Numeric(18, 6), nullable=True)
+    # Baseline sales before any marketing contribution for this subchannel.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

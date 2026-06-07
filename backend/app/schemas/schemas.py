@@ -174,19 +174,42 @@ class PaginatedUploads(BaseModel):
 # ── Channel / Subchannel Parameters ──────────────────────────────────────────
 
 class SubchannelParamOut(BaseModel):
-    """Single subchannel parameter row returned in upload previews and detail views."""
+    """
+    Single subchannel parameter row returned in upload previews and detail views.
+
+    The MMM coefficient fields (estimate through base_sales) are populated only
+    when the parent upload is of type 'model_fact'. They are null for rows sourced
+    from channel_params uploads.
+    """
     subchannel_name: str
     roi_coefficient: float
     min_spend: float
     max_spend: float
+    category: Optional[str] = None
+    variable: Optional[str] = None
+    estimate: Optional[float] = None
+    curve_type: Optional[str] = None
+    curvature: Optional[float] = None
+    adstock_rate: Optional[float] = None
+    adstock_horizon: Optional[int] = None
+    p_value: Optional[float] = None
+    impactable_sales_pct: Optional[float] = None
+    base_sales: Optional[float] = None
 
 
 class ChannelParamOut(BaseModel):
-    """Single channel parameter row with its subchannel children."""
+    """
+    Single channel parameter row with its subchannel children.
+
+    category and variable are sourced from MODEL_FACT uploads. They are null
+    for rows created by channel_params uploads.
+    """
     channel_name: str
     roi_coefficient: float
     min_spend: float
     max_spend: float
+    category: Optional[str] = None
+    variable: Optional[str] = None
     subchannels: List[SubchannelParamOut]
 
 
@@ -398,6 +421,65 @@ class PaginatedResponse(BaseModel):
     page: int
     page_size: int
     items: List[Any]
+
+
+# ── Model Summary (Channel Parameters) ───────────────────────────────────────
+
+class SubChannelSummarySchema(BaseModel):
+    """
+    Per-subchannel row returned by GET /reports/model-summary.
+
+    The MMM coefficient fields (estimate through base_sales) are populated only
+    when the parent upload is of type 'model_fact'. They are null for rows sourced
+    from channel_params uploads. impactable_sales_pct drives the contribution %
+    displayed in the Model Summary screen.
+    """
+
+    channel: str
+    sub_channel: str
+    roi_coefficient: float
+    current_spend: float  # sourced from SubchannelParameter.min_spend
+    min_spend: float
+    max_spend: float
+    category: Optional[str] = None
+    variable: Optional[str] = None
+    estimate: Optional[float] = None
+    curve_type: Optional[str] = None
+    curvature: Optional[float] = None
+    adstock_rate: Optional[float] = None
+    adstock_horizon: Optional[int] = None
+    p_value: Optional[float] = None
+    impactable_sales_pct: Optional[float] = None
+    base_sales: Optional[float] = None
+
+
+class ModelSummaryDataSchema(BaseModel):
+    """
+    Response payload for GET /reports/model-summary.
+
+    current_spend per subchannel is sourced from DATA_FACT (sum of spend for the
+    cycle's channel/sub_channel combination), falling back to
+    SubchannelParameter.min_spend when no DATA_FACT rows exist for that subchannel.
+
+    baseline_kpi and total_incremental_sales are numerically identical:
+    sum(current_spend × roi_coefficient) across all subchannels.  baseline_kpi is
+    kept for backward compatibility with existing frontend consumers.
+
+    total_base_sales sums SubchannelParameter.base_sales (populated from MODEL_FACT
+    uploads); it is 0.0 for channel_params-sourced rows that lack this field.
+    """
+
+    baseline_kpi: float
+    channels: List[SubChannelSummarySchema]
+    cycle_id: str
+    uploaded_at: datetime
+    total_spend: float
+    total_sales: float
+    overall_roi: float
+    total_base_sales: float
+    total_incremental_sales: float
+    base_pct: float
+    incremental_pct: float
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────

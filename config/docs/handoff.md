@@ -686,3 +686,188 @@ only use case in the codebase. No regressions from the replacement.
   If DataHistory needs a reusable paginated table, create `DataTablePaginated.tsx` rather than restoring
   the old DrawerDataset.
 
+---
+
+## Model Summary Module — Session 2026-06-06
+
+### What was built
+
+Complete end-to-end Model Summary (Module 03) module.  Connects the Model Summary screen to real
+`ChannelParameter` and `SubchannelParameter` data uploaded during Data Input.  Replaces all
+hardcoded KPI values, chart data, and table rows with API-driven data filtered by the active
+Market / Brand / Indication from FilterContext.
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `backend/app/services/reports_service.py` | `get_model_summary()` — resolves MetaData → CycleDef → successful channel_params Upload → ChannelParameter + SubchannelParameter rows; returns `ModelSummaryDataSchema`; uses `selectinload` to avoid N+1 |
+| `frontend/src/hooks/useModelSummary.ts` | Fetches model summary from API on filter change; skips request when any filter is null; returns `{ summaryData, isLoading, error, refetch }` |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `backend/app/schemas/schemas.py` | Added `SubChannelSummarySchema` and `ModelSummaryDataSchema` before the existing `DashboardKPIs` section |
+| `backend/app/api/v1/endpoints/reports.py` | Added `GET /reports/model-summary` (filter-param version) before the existing `GET /reports/model-summary/{cycle_id}` path; imports `get_model_summary` inline to avoid circular import |
+| `frontend/src/utils/types.ts` | Added `SubChannelSummary` and `ModelSummaryData` interfaces under the Model Summary section |
+| `frontend/src/services/reports.service.ts` | Added `fetchModelSummary(market, brand, indication)` — calls new endpoint, manually unwraps `{ success, data, message }` envelope, normalizes snake_case to camelCase |
+| `frontend/src/pages/ModelSummary.tsx` | Complete rewrite: all hardcoded data replaced; reads FilterContext; uses `useModelSummary`; loading/error/empty states; 2-level channel/subchannel table; live GroupedBarChart, TopBottomChannels, ScatterChart |
+
+### Architectural decisions
+
+**`current_spend` sourced from DATA_FACT:** For each subchannel, `current_spend` is the sum of
+`data_fact.spend` grouped by `(cycle_id, channel, sub_channel)` — actual historical spend from the
+DATA_FACT upload for that cycle. When no DATA_FACT rows exist for a subchannel (e.g. a MODEL_FACT was
+uploaded before the DATA_FACT, or the channel names don't match), it falls back to
+`SubchannelParameter.min_spend`. Both paths are documented in the service module docstring.
+
+**Baseline KPI and derived KPIs:** `baseline_kpi = total_incremental_sales = sum(current_spend ×
+roi_coefficient)` across all subchannels. The API also returns `total_spend`, `total_sales`,
+`overall_roi`, `total_base_sales`, `total_incremental_sales`, `base_pct`, `incremental_pct` — all
+computed server-side in `reports_service.get_model_summary()`, not by importing `kpi_calculator.py`
+(which would cross architectural boundaries between the reports and optimizer layers).
+`total_base_sales` sums `SubchannelParameter.base_sales` from MODEL_FACT uploads; it is 0.0 for
+channel_params-sourced rows that lack this field.
+
+**Filter resolution chain:** `market + brand + indication → MetaData.metadata_id → most recent
+CycleDef.cycle_id → most recent Upload (status=success, upload_type=channel_params) → ChannelParameter
++ SubchannelParameter (selectinload)`.  If any step yields no row, the endpoint returns
+`{ success: true, data: null, message: "No model data found…" }` — not a 404.
+
+**Response envelope:** New endpoint uses `{ success, data, message }` (consistent with CLAUDE.md
+pattern) unlike the older `/model-summary/{cycle_id}` which returns data directly.  The service
+method manually unwraps the envelope before returning to the hook.
+
+**Path ordering in reports.py:** The filter-param endpoint `GET /model-summary` is registered
+BEFORE the path-param endpoint `GET /model-summary/{cycle_id}` to prevent FastAPI from absorbing
+`?market=...` query-string requests into the `{cycle_id}` route.
+
+**3-level → 2-level table:** The original hardcoded table had three tiers (Category > Channel >
+Subchannel). The API data has two (Channel > Subchannel).  Channel is now the outer expandable
+tier; the Category concept is dropped from the table.  Channel color assignment is dynamic from a
+fixed 10-color `CHANNEL_COLORS` palette mapped to channels in order of appearance.
+
+**Chart components accept props:** `GroupedBarChart`, `TopBottomChannels`, and `ScatterChart` are
+local sub-components that accept channel/subchannel data as props derived from `summaryData`.  They
+do not close over hardcoded constants.  Each supports an empty state (no data rendered → message).
+
+**KpiCard does not accept `className`:** The shared `KpiCard` component has no `className` prop.
+The three KPI cards render without grid-span overrides; the mini stacked bar chart uses a raw
+`<Card>` for the remaining 3 of 6 columns.
+
+### Data flow
+
+```
+FilterContext { market, brand, indication }
+  → useModelSummary(market, brand, indication)
+    → reportsService.fetchModelSummary(market, brand, indication)
+      → GET /api/v1/reports/model-summary?market=&brand=&indication=
+        → reports_service.get_model_summary()
+          → MetaData → CycleDef → Upload → ChannelParameter + SubchannelParameter
+          → DataFact (spend aggregated by channel/subchannel for the cycle)
+          → SubchannelParameter.current_spend = DataFact spend or min_spend fallback
+    → ModelSummaryData {
+        baselineKpi, channels[], cycleId, uploadedAt,
+        totalSpend, totalSales, overallRoi,
+        totalBaseSales, totalIncrementalSales, basePct, incrementalPct
+      }
+  → channelGroups (useMemo — grouped + aggregated from channels[])
+  → chartChannels, chartSubchannels, chartScatter (useMemo — shaped for each chart)
+  → filteredChannels (useMemo — filtered + sorted table rows)
+  KPI cards use summaryData.totalSpend and summaryData.overallRoi (server-computed)
+```
+
+### Known issues / TODO before staging
+
+- **Chart export is a no-op:** Export buttons (`ExportButton`) call `markExported()` (which updates
+  the "Exported" badge) but do not actually serialize any chart to PNG/CSV.  Implementing requires
+  `html2canvas` or a chart library's own export utilities. Add as follow-up.
+- **TopBottomChannels shows all subchannels when category filter is "all":** The top/bottom 10%
+  slices are taken from all subchannels regardless of channel. If users need per-channel ranking,
+  filter to a single channel first using the channel dropdown in that panel.
+- **Sort requires expand-all:** Column-header sort in the contribution table only takes effect when
+  rows are expanded (the `isAnythingExpanded` guard prevents sort clicks on collapsed table). This
+  is by design — the sort UX makes no sense when only channel-level summary rows are visible.
+- **`--success` and `--danger` CSS variables in table:** The contribution delta arrows (`↑`/`↓`)
+  reference `var(--success)` and `var(--danger)`. Confirm these CSS custom properties exist in the
+  global stylesheet (they are used elsewhere in the codebase and should be present).
+- **ScatterChart y-axis label truncation:** For cycles with many subchannels, dots cluster near
+  the x-axis if sales values are close to zero. The current axis scaling leaves 15% headroom above
+  `maxSales`; if needed, adjust `* 1.15` factor.
+
+---
+
+## Schema Alignment: MODEL_FACT + DATA_FACT columns — Session 2026-06-07
+
+### What was built
+
+Schema alignment pass to add missing MMM parameter columns to `channel_parameter` and
+`subchannel_parameter`, update Pydantic schemas to expose those columns, update the upload
+service to persist MODEL_FACT data into the channel parameter tables, and update the Model
+Summary service to consume MODEL_FACT-sourced channel parameter rows.
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `backend/app/models/models.py` | `ChannelParameter`: added `category`, `variable`. `SubchannelParameter`: added `category`, `variable`, `estimate`, `curve_type`, `curvature`, `adstock_rate`, `adstock_horizon`, `p_value`, `impactable_sales_pct`, `base_sales`. Full docstrings on new columns. |
+| `backend/app/schemas/schemas.py` | `SubchannelParamOut`: added all 10 new optional fields. `ChannelParamOut`: added `category`, `variable`. `SubChannelSummarySchema` (Model Summary): added all 10 new optional fields so the Model Summary API response carries full MMM parameter data. |
+| `backend/app/services/upload_service.py` | `process_upload`: sets `upload_type` on DATA_FACT ("data_fact") and MODEL_FACT ("model_fact") uploads. Added `_validate_model_fact_content` (estimate not null, impactable_sales_pct 0–100, adstock_rate 0–1). Added `_validate_data_fact_content` (spend ≥ 0). Updated `_ingest_model_fact` signature to accept `cycle_id`; it now calls `_create_channel_params_from_model_fact` after inserting ModelFact rows. Added `_create_channel_params_from_model_fact`: groups MODEL_FACT rows by channel, creates ChannelParameter + SubchannelParameter rows with all MMM fields, so Model Summary can read MODEL_FACT data through the channel parameter schema without requiring a separate channel_params upload. |
+| `backend/app/services/reports_service.py` | `get_model_summary`: now searches for `upload_type IN ('channel_params', 'model_fact')` instead of only `'channel_params'`. Subchannel row construction now populates all new MMM fields from `SubchannelParameter` into `SubChannelSummarySchema`. |
+| `backend/alembic/versions/e8e559c02611_model_fact_spend_fact_columns.py` | Migration: adds `category`, `variable` to `channel_parameter`; adds all 10 MMM columns to `subchannel_parameter`. Uses `IF NOT EXISTS` because these columns existed in the DB prior to this migration being formalised. |
+
+### Migration revision
+
+`e8e559c02611` — down_revision: `0002`
+
+### SpendFact table — not added
+
+The task brief assumed no DATA_FACT spend table existed. In fact `DataFact` (the `data_fact`
+table) was already created in migration 0000 and fully covers the same use case. Adding a
+`SpendFact` table would be a direct duplicate. `DataFact` continues to be the canonical store
+for DATA_FACT uploads.
+
+### Remaining work
+
+Module 04 — Scenario Planning (ready to implement; all upstream data is now fully stored and accessible).
+
+---
+
+## FilterBar → FilterContext Fix — Session 2026-06-05
+
+### Root cause
+
+Two structural bugs caused the filter dropdowns in the Data History tab to have no effect
+on the page's content:
+
+1. **FilterBar was rendered outside `<FilterProvider>`** in `App.tsx`. The `<FilterBar>` JSX
+   appeared before `<FilterProvider>` in the render tree, making it structurally impossible
+   for FilterBar to call `useFilters()` — doing so would have thrown "useFilters must be used
+   within a FilterProvider."
+
+2. **FilterBar used isolated local state with hardcoded option arrays.** Its internal
+   `useState<Record<string, string>>` was seeded from a hardcoded `defaultFilters` object
+   containing fake options (`['US', 'US Northeast', ...]`, `['Brand A', 'Product Alpha', ...]`).
+   User selections never called `setMarket`, `setBrand`, or `setIndication`, so
+   `filters.metadataId` stayed `null` permanently on the Data History tab — blocking all
+   cycle loading and downstream data.
+
+### Files changed
+
+| File | What changed |
+|------|-------------|
+| `frontend/src/app.tsx` | Moved `<FilterProvider>` up to wrap both `<FilterBar>` and `{renderScreen()}`. Previously FilterProvider only wrapped renderScreen(). No other App.tsx logic changed. |
+| `frontend/src/components/shared/layout/FilterBar.tsx` | Replaced hardcoded `defaultFilters` with `useFilters()` from FilterContext. Market/Brand/Indication options now come from `options.markets`, `options.brands`, `options.indications` (the same API-fetched metadata used by Data Input's inline dropdowns). onChange handlers now call `setMarket`, `setBrand`, `setIndication` directly — no local state for these three fields, no Apply batching. Reset calls `setMarket(null)` which cascades to clear brand, indication, and metadataId via FilterContext. The `filters` prop (old hardcoded FilterOption array) has been removed entirely. |
+
+### Cycle filter status (pending wiring)
+
+The Cycle filter row in FilterBar is kept as **local state** via a `cycleOptions?: string[]` prop.
+It is not currently wired to Data History's cycle display (which has its own inline cycle selector).
+The `cycleOptions` prop defaults to `[]`, so the Cycle row is hidden unless the caller passes
+cycle IDs. To complete the wiring: pass `useDataHistory().availableCycles` from DataHistory's
+render tree to FilterBar via the prop. This requires either lifting the prop through App.tsx
+(complex) or moving the cycle selector inside FilterBar and giving FilterBar access to
+`reportsService.fetchAvailableCycles`. For now, DataHistory's own inline cycle `<Select>` (shown
+below the filter bar when `filters.metadataId` is set) is the functional cycle selector.
+

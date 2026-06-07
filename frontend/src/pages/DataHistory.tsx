@@ -201,18 +201,85 @@ export default function DataHistory() {
                 </table>
               </div>
             )}
-            {!h.rowsLoading && h.totalPages > 1 && (
-              <div className="px-5 py-4 border-t border-[var(--border)] bg-[var(--surface-subtle)] rounded-b-[12px] flex items-center justify-between">
-                <p className="text-[12px] text-[var(--ink-500)]">
-                  Showing <span className="font-semibold text-[var(--ink-700)]">{h.total > 0 ? (h.page - 1) * h.pageSize + 1 : 0}–{Math.min(h.page * h.pageSize, h.total)}</span> of <span className="font-semibold text-[var(--ink-700)]">{h.total}</span>
-                </p>
-                <div className="flex gap-1">
-                  {Array.from({ length: Math.min(h.totalPages, 7) }, (_, i) => i + 1).map((pg) => (
-                    <button key={pg} type="button" onClick={() => h.setPage(pg)} className={`min-w-[32px] h-8 px-2.5 text-[12px] rounded-md border transition-colors ${pg === h.page ? 'bg-[var(--brand)] text-white border-[var(--brand)]' : 'bg-white text-[var(--ink-700)] border-[var(--border-strong)] hover:border-[var(--ink-400)]'}`}>{pg}</button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Replace the existing pagination footer with this */}
+{!h.rowsLoading && h.totalPages > 1 && (
+  <div className="px-5 py-4 border-t border-[var(--border)] bg-[var(--surface-subtle)] rounded-b-[12px] flex items-center justify-between">
+    <p className="text-[12px] text-[var(--ink-500)]">
+      Showing{' '}
+      <span className="font-semibold text-[var(--ink-700)]">
+        {h.total > 0 ? (h.page - 1) * h.pageSize + 1 : 0}–{Math.min(h.page * h.pageSize, h.total)}
+      </span>{' '}
+      of <span className="font-semibold text-[var(--ink-700)]">{h.total}</span>
+    </p>
+    <div className="flex items-center gap-1">
+      {/* Previous */}
+      <button
+        type="button"
+        onClick={() => h.setPage(h.page - 1)}
+        disabled={h.page === 1}
+        className="px-2.5 py-1.5 text-[12px] rounded-md border border-[var(--border-strong)] bg-white text-[var(--ink-700)] hover:border-[var(--ink-400)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        ← Prev
+      </button>
+
+      {/* Page number buttons with ellipsis */}
+      {(() => {
+        const total = h.totalPages;
+        const current = h.page;
+        const pages: (number | '...')[] = [];
+
+        if (total <= 7) {
+          // Show all pages
+          for (let i = 1; i <= total; i++) pages.push(i);
+        } else {
+          // Always show first, last, current, and neighbors
+          const around = new Set([
+            1, total,
+            current - 1, current, current + 1,
+          ]);
+          let prev = 0;
+          Array.from(around)
+            .filter((p) => p >= 1 && p <= total)
+            .sort((a, b) => a - b)
+            .forEach((p) => {
+              if (prev && p - prev > 1) pages.push('...');
+              pages.push(p);
+              prev = p;
+            });
+        }
+
+        return pages.map((pg, i) =>
+          pg === '...' ? (
+            <span key={`ellipsis-${i}`} className="px-1.5 text-[12px] text-[var(--ink-400)]">…</span>
+          ) : (
+            <button
+              key={pg}
+              type="button"
+              onClick={() => h.setPage(pg)}
+              className={`min-w-[32px] h-8 px-2.5 text-[12px] rounded-md border transition-colors ${
+                pg === current
+                  ? 'bg-[var(--brand)] text-white border-[var(--brand)]'
+                  : 'bg-white text-[var(--ink-700)] border-[var(--border-strong)] hover:border-[var(--ink-400)]'
+              }`}
+            >
+              {pg}
+            </button>
+          )
+        );
+      })()}
+
+      {/* Next */}
+      <button
+        type="button"
+        onClick={() => h.setPage(h.page + 1)}
+        disabled={h.page === h.totalPages}
+        className="px-2.5 py-1.5 text-[12px] rounded-md border border-[var(--border-strong)] bg-white text-[var(--ink-700)] hover:border-[var(--ink-400)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        Next →
+      </button>
+    </div>
+  </div>
+)}
           </Card>
         </div>
       )}

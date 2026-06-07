@@ -1,30 +1,21 @@
 /**
  * DataInput.tsx
  *
- * Wrapper component that provides FilterContext to the Data Input flow.
- * Scopes Market/Brand/Indication filter state to this module only.
+ * Thin wrapper that renders DataInputContent.
+ * FilterProvider is now provided at the app level (App.tsx),
+ * so no local provider is needed here.
  */
-import React from 'react';
-import { FilterProvider } from '@/context/FilterContext';
 import DataInputContent from './DataInputContent';
-
-interface DataInputProps {
-  onNavigate?: (tab: string) => void;
-  onUploadComplete?: () => void;
-}
 
 /**
  * DataInput
  *
- * Wraps DataInputContent with FilterProvider so filter state is scoped to
- * the Data Input module. Passes navigation and upload callbacks through.
- *
- * @param {DataInputProps} props
+ * Entry point for the Data Input module.
+ * Renders DataInputContent which consumes FilterContext from the app-level provider.
  */
-export default function DataInput({ onNavigate, onUploadComplete }: DataInputProps) {
-  return (
-    <FilterProvider>
-      <DataInputContent onNavigate={onNavigate} onUploadComplete={onUploadComplete} />
-    </FilterProvider>
-  );
+export default function DataInput({ onNavigate, onUploadComplete }: {
+  onNavigate?: (tab: string) => void;
+  onUploadComplete?: () => void;
+}) {
+  return <DataInputContent onNavigate={onNavigate} onUploadComplete={onUploadComplete} />;
 }

@@ -2,14 +2,15 @@
  * reports.service.ts
  *
  * Handles all API communication for the Reporting module.
- * Covers model summary, data history, dashboard KPIs, metadata fetching,
- * data-fact variable discovery, and all Data History screen endpoints
- * (cycle listing, KPI summary, spend/revenue trends, channel breakdown).
- * All responses are typed and normalized before being returned to hooks.
+ * Covers model summary (channel parameter based), data history, dashboard KPIs,
+ * metadata fetching, data-fact variable discovery, and all Data History screen
+ * endpoints (cycle listing, KPI summary, spend/revenue trends, channel breakdown).
+ * All responses are typed and normalized to camelCase before being returned to hooks.
  */
 import { api } from './api-client';
 import type {
   MetaData,
+  ModelSummaryData,
   DataHistoryKPI,
   SpendTrendPoint,
   RevenueTrendPoint,
@@ -68,6 +69,74 @@ export interface DashboardKPIs {
 }
 
 export const reportsService = {
+  /**
+   * Fetches model summary data for the given market, brand, and indication.
+   *
+   * Calls GET /reports/model-summary with the three filter query params.
+   * Normalizes the API's snake_case subchannel fields to camelCase before
+   * returning. Returns null when the API signals no data exists for the filters.
+   *
+   * @param {string} market - Market name from META_DATA.
+   * @param {string} brand - Brand name from META_DATA.
+   * @param {string} indication - Indication name from META_DATA.
+   * @returns {Promise<ModelSummaryData | null>} Normalized summary or null.
+   * @throws Will throw if the API request fails.
+   */
+  fetchModelSummary: async (
+    market: string,
+    brand: string,
+    indication: string,
+  ): Promise<ModelSummaryData | null> => {
+    const qs = new URLSearchParams({ market, brand, indication });
+    const envelope = await api.get<{
+      success: boolean;
+      data: {
+        baseline_kpi: number;
+        channels: Array<{
+          channel: string;
+          sub_channel: string;
+          roi_coefficient: number;
+          current_spend: number;
+          min_spend: number;
+          max_spend: number;
+        }>;
+        cycle_id: string;
+        uploaded_at: string;
+        total_spend: number;
+        total_sales: number;
+        overall_roi: number;
+        total_base_sales: number;
+        total_incremental_sales: number;
+        base_pct: number;
+        incremental_pct: number;
+      } | null;
+      message: string;
+    }>(`/reports/model-summary?${qs}`);
+
+    if (!envelope.data) return null;
+
+    return {
+      baselineKpi: envelope.data.baseline_kpi,
+      channels: envelope.data.channels.map((ch) => ({
+        channel: ch.channel,
+        subChannel: ch.sub_channel,
+        roiCoefficient: ch.roi_coefficient,
+        currentSpend: ch.current_spend,
+        minSpend: ch.min_spend,
+        maxSpend: ch.max_spend,
+      })),
+      cycleId: envelope.data.cycle_id,
+      uploadedAt: envelope.data.uploaded_at,
+      totalSpend: envelope.data.total_spend,
+      totalSales: envelope.data.total_sales,
+      overallRoi: envelope.data.overall_roi,
+      totalBaseSales: envelope.data.total_base_sales,
+      totalIncrementalSales: envelope.data.total_incremental_sales,
+      basePct: envelope.data.base_pct,
+      incrementalPct: envelope.data.incremental_pct,
+    };
+  },
+
   modelSummary: (cycleId: string) =>
     api.get<ModelSummaryOut>(`/reports/model-summary/${cycleId}`),
 

@@ -160,10 +160,35 @@ class UploadService:
         if resolved_cycle_id:
             await self._ensure_cycle(resolved_cycle_id, metadata_id)
 
+        # ── Row-level content validation (MODEL_FACT only) ────────────────────
+        if not is_datafile:
+            content_errors = self._validate_model_fact_content(df)
+            if content_errors:
+                return await self._fail_upload(
+                    filename=filename,
+                    is_datafile=is_datafile,
+                    cycle_id=cycle_id,
+                    uploaded_by=uploaded_by,
+                    errors=content_errors,
+                )
+
+        # ── Row-level content validation (DATA_FACT only) ─────────────────────
+        if is_datafile:
+            data_content_errors = self._validate_data_fact_content(df)
+            if data_content_errors:
+                return await self._fail_upload(
+                    filename=filename,
+                    is_datafile=is_datafile,
+                    cycle_id=cycle_id,
+                    uploaded_by=uploaded_by,
+                    errors=data_content_errors,
+                )
+
         # ── Create upload audit record ─────────────────────────────────────────
         upload = Upload(
             cycle_id=resolved_cycle_id,
             is_datafile=is_datafile,
+            upload_type="data_fact" if is_datafile else "model_fact",
             filename=filename,
             file_size_bytes=len(file_bytes),
             row_count=len(df),
@@ -178,7 +203,7 @@ class UploadService:
             if is_datafile:
                 await self._ingest_data_fact(df, upload.upload_id)
             else:
-                await self._ingest_model_fact(df, upload.upload_id)
+                await self._ingest_model_fact(df, upload.upload_id, resolved_cycle_id or "")
                 if target_variable and cycle_id:
                     await self._update_cycle_target_variable(cycle_id, target_variable)
 
@@ -292,7 +317,22 @@ class UploadService:
             self.db.add_all(rows)
             await self.db.flush()
 
-    async def _ingest_model_fact(self, df: pd.DataFrame, upload_id: int) -> None:
+    async def _ingest_model_fact(
+        self, df: pd.DataFrame, upload_id: int, cycle_id: str
+    ) -> None:
+        """
+        Persist MODEL_FACT rows to model_fact and channel/subchannel_parameter tables.
+
+        Each file row is inserted into model_fact for historical record-keeping.
+        Additionally, ChannelParameter and SubchannelParameter rows are created so
+        that the Model Summary screen can read the full MMM parameter set without
+        requiring a separate channel_params upload.
+
+        Args:
+            df:        Validated MODEL_FACT DataFrame.
+            upload_id: The Upload record ID to link all rows to.
+            cycle_id:  The resolved cycle identifier for this upload.
+        """
         rows = []
         for _, row in df.iterrows():
             rows.append(ModelFact(
@@ -318,6 +358,174 @@ class UploadService:
         if rows:
             self.db.add_all(rows)
             await self.db.flush()
+
+        # Also create ChannelParameter / SubchannelParameter rows so the Model
+        # Summary can consume MODEL_FACT data through the channel parameter schema.
+        await self._create_channel_params_from_model_fact(df, upload_id, cycle_id)
+
+    async def _create_channel_params_from_model_fact(
+        self, df: pd.DataFrame, upload_id: int, cycle_id: str
+    ) -> None:
+        """
+        Create ChannelParameter and SubchannelParameter rows from MODEL_FACT data.
+
+        Groups MODEL_FACT rows by channel and creates one ChannelParameter per
+        distinct channel value, with one SubchannelParameter per sub_channel row.
+        All MMM coefficient columns are populated from the corresponding MODEL_FACT
+        columns. min_spend and max_spend default to 0.0 because MODEL_FACT does not
+        carry spend bounds — these can be overridden by a subsequent channel_params
+        upload for the same cycle.
+
+        roi_coefficient on both ChannelParameter and SubchannelParameter is set to
+        the estimate value (or average estimate across the channel's subchannels for
+        the parent row). This makes the Model Summary baseline KPI formula
+        (sum(current_spend * roi_coefficient)) use the MMM estimate directly.
+
+        Args:
+            df:        Validated MODEL_FACT DataFrame with MMM coefficient columns.
+            upload_id: The MODEL_FACT upload ID to link the created records to.
+            cycle_id:  The cycle identifier for the created records.
+        """
+        for channel_name, group in df.groupby("channel", sort=False):
+            estimates = [
+                self._safe_float(v)
+                for v in group["estimate"]
+                if self._safe_float(v) is not None
+            ]
+            avg_estimate = sum(estimates) / len(estimates) if estimates else 0.0
+
+            first_row = group.iloc[0]
+            category_val = str(first_row.get("category", "") or "").strip() or None
+            variable_val = str(first_row.get("variable", "") or "").strip() or None
+
+            channel_param = ChannelParameter(
+                upload_id=upload_id,
+                cycle_id=cycle_id,
+                channel_name=str(channel_name),
+                roi_coefficient=avg_estimate,
+                min_spend=0.0,
+                max_spend=0.0,
+                category=category_val,
+                variable=variable_val,
+            )
+            self.db.add(channel_param)
+            await self.db.flush()  # generate channel_param.id before creating subchannels
+
+            for _, sub_row in group.iterrows():
+                estimate_val = self._safe_float(sub_row.get("estimate"))
+                sub_param = SubchannelParameter(
+                    channel_parameter_id=channel_param.id,
+                    subchannel_name=str(sub_row.get("sub_channel", "") or ""),
+                    roi_coefficient=estimate_val or 0.0,
+                    min_spend=0.0,
+                    max_spend=0.0,
+                    category=str(sub_row.get("category", "") or "").strip() or None,
+                    variable=str(sub_row.get("variable", "") or "").strip() or None,
+                    estimate=estimate_val,
+                    curve_type=str(sub_row.get("curve_type", "") or "").strip() or None,
+                    curvature=self._safe_float(sub_row.get("curvature")),
+                    adstock_rate=self._safe_float(sub_row.get("adstock_rate")),
+                    adstock_horizon=self._safe_int(sub_row.get("adstock_horizon")),
+                    p_value=self._safe_float(sub_row.get("p_value")),
+                    impactable_sales_pct=self._safe_float(sub_row.get("impactable_sales_pct")),
+                    base_sales=self._safe_float(sub_row.get("base_sales")),
+                )
+                self.db.add(sub_param)
+
+            await self.db.flush()
+
+    def _validate_model_fact_content(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Validate MODEL_FACT row content after type coercion.
+
+        Checks that estimate is non-null, impactable_sales_pct is within 0–100,
+        and adstock_rate is within 0–1. Returns a list of error dicts using the
+        same structure as _coerce_types errors for consistent error reporting.
+
+        Args:
+            df: MODEL_FACT DataFrame after type coercion (numeric columns as float).
+
+        Returns:
+            List of error dicts with 'field', 'message', and 'row' keys.
+            Empty list if all rows pass validation.
+        """
+        errors: List[Dict] = []
+
+        if "estimate" in df.columns:
+            null_rows = df.index[df["estimate"].isna()].tolist()
+            if null_rows:
+                errors.append({
+                    "field": "estimate",
+                    "message": (
+                        f"estimate is required and must be a valid number. "
+                        f"Null or invalid at rows: {null_rows[:5]}"
+                    ),
+                    "row": null_rows[0],
+                })
+
+        if "impactable_sales_pct" in df.columns:
+            out_of_range = df.index[
+                df["impactable_sales_pct"].notna()
+                & (
+                    (df["impactable_sales_pct"] < 0)
+                    | (df["impactable_sales_pct"] > 100)
+                )
+            ].tolist()
+            if out_of_range:
+                errors.append({
+                    "field": "impactable_sales_pct",
+                    "message": (
+                        f"impactable_sales_pct must be between 0 and 100. "
+                        f"Out-of-range at rows: {out_of_range[:5]}"
+                    ),
+                    "row": out_of_range[0],
+                })
+
+        if "adstock_rate" in df.columns:
+            out_of_range = df.index[
+                df["adstock_rate"].notna()
+                & ((df["adstock_rate"] < 0) | (df["adstock_rate"] > 1))
+            ].tolist()
+            if out_of_range:
+                errors.append({
+                    "field": "adstock_rate",
+                    "message": (
+                        f"adstock_rate must be between 0 and 1 (got out-of-range at "
+                        f"rows: {out_of_range[:5]})"
+                    ),
+                    "row": out_of_range[0],
+                })
+
+        return errors
+
+    def _validate_data_fact_content(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Validate DATA_FACT row content after type coercion.
+
+        Checks that spend is non-negative wherever present.
+
+        Args:
+            df: DATA_FACT DataFrame after type coercion.
+
+        Returns:
+            List of error dicts. Empty list if all rows pass validation.
+        """
+        errors: List[Dict] = []
+
+        if "spend" in df.columns:
+            negative_rows = df.index[
+                df["spend"].notna() & (df["spend"] < 0)
+            ].tolist()
+            if negative_rows:
+                errors.append({
+                    "field": "spend",
+                    "message": (
+                        f"spend must be >= 0. Negative values at rows: {negative_rows[:5]}"
+                    ),
+                    "row": negative_rows[0],
+                })
+
+        return errors
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
