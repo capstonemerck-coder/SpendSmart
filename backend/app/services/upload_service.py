@@ -294,14 +294,53 @@ class UploadService:
     # ── Ingestion ─────────────────────────────────────────────────────────────
 
     async def _ingest_data_fact(self, df: pd.DataFrame, upload_id: int) -> None:
+        """
+        Persist DATA_FACT rows to the data_fact table.
+
+        Because the DATA_FACT file does not carry a category column, category is
+        looked up from model_fact using (cycle_id, channel, sub_channel) as the
+        composite key. This ensures data_fact.category is consistent with
+        model_fact.category for the same cycle, enabling category-level aggregation
+        in the Model Summary service.
+
+        Args:
+            df:        Validated DATA_FACT DataFrame after type coercion.
+            upload_id: The Upload record ID to link all inserted rows to.
+        """
+        # ── Build category lookup from model_fact ─────────────────────────────
+        # Resolve cycle_id from the first row (already validated non-empty by this point).
+        resolved_cycle_id = str(df["cycle_id"].iloc[0]) if not df.empty else ""
+
+        category_result = await self.db.execute(
+            select(ModelFact.channel, ModelFact.sub_channel, ModelFact.category)
+            .where(ModelFact.cycle_id == resolved_cycle_id)
+            .where(ModelFact.category.isnot(None))
+        )
+        # key: (channel, sub_channel) → category string
+        category_lookup: dict[tuple[str, str], str] = {
+            (row.channel, row.sub_channel): row.category
+            for row in category_result.all()
+            if row.channel and row.sub_channel
+        }
+
+        # ── Insert rows, stamping category from lookup ────────────────────────
         rows = []
         for _, row in df.iterrows():
+            channel_val = str(row.get("channel", "")) or None
+            sub_channel_val = str(row.get("sub_channel", "")) or None
+
+            # Prefer any category value in the file; fall back to model_fact lookup.
+            category_val = (
+                str(row.get("category", "")).strip() or None
+                or category_lookup.get((channel_val, sub_channel_val))
+            )
+
             rows.append(DataFact(
                 cycle_id=str(row.get("cycle_id", "")),
                 date=row.get("date") if not pd.isna(row.get("date", pd.NaT)) else None,
-                category=str(row.get("category", "")) or None,
-                channel=str(row.get("channel", "")) or None,
-                sub_channel=str(row.get("sub_channel", "")) or None,
+                category=category_val,
+                channel=channel_val,
+                sub_channel=sub_channel_val,
                 variable=str(row.get("variable", "")) or None,
                 spend=self._safe_float(row.get("spend")),
                 reach=self._safe_float(row.get("reach")),
