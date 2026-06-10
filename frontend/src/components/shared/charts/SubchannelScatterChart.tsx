@@ -7,7 +7,7 @@
  * Colors are resolved via getCategoryColor per subchannel category.
  */
 import { useRef, useState, useEffect } from 'react';
-import { getCategoryColor, fmtExact } from '@/utils/categories';
+import { getCategoryColor, fmtCompact, fmtExact, fmtROI } from '@/utils/categories';
 import type { SubchannelLevelCalc } from '@/utils/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -15,13 +15,6 @@ import type { SubchannelLevelCalc } from '@/utils/types';
 export interface SubchannelScatterChartProps {
   /** Subchannel rows from the model summary response. */
   subchannels: SubchannelLevelCalc[];
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmtM(v: number): string {
-  if (v >= 1) return `$${v.toFixed(1)}M`;
-  return `$${(v * 1000).toFixed(0)}K`;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -80,13 +73,13 @@ export function SubchannelScatterChart({ subchannels }: SubchannelScatterChartPr
         {yTicks.map((t) => (
           <g key={`y${t}`}>
             <line x1={PAD.l} x2={W - PAD.r} y1={toY(t)} y2={toY(t)} stroke="#F4F4F5" strokeWidth="1" />
-            <text x={PAD.l - 8} y={t === 0 ? toY(t) - 4 : toY(t) + 4} textAnchor="end" fontSize="9" fill="#A1A1AA">{fmtM(t)}</text>
+            <text x={PAD.l - 8} y={t === 0 ? toY(t) - 4 : toY(t) + 4} textAnchor="end" fontSize="9" fill="#A1A1AA">{fmtCompact(t * 1_000_000)}</text>
           </g>
         ))}
         {xTicks.map((t) => (
           <g key={`x${t}`}>
             <line x1={toX(t)} x2={toX(t)} y1={PAD.t} y2={H - PAD.b} stroke="#F4F4F5" strokeWidth="1" />
-            <text x={toX(t)} y={H - PAD.b + 14} textAnchor="middle" fontSize="9" fill="#A1A1AA">{fmtM(t)}</text>
+            <text x={toX(t)} y={H - PAD.b + 14} textAnchor="middle" fontSize="9" fill="#A1A1AA">{fmtCompact(t * 1_000_000)}</text>
           </g>
         ))}
         <line x1={PAD.l} x2={W - PAD.r} y1={H - PAD.b} y2={H - PAD.b} stroke="#D4D4D8" strokeWidth="1" />
@@ -128,7 +121,7 @@ export function SubchannelScatterChart({ subchannels }: SubchannelScatterChartPr
           <div className="text-white/70">Category: {tooltip.d.category}</div>
           <div className="text-white/70">Spend: {fmtExact(tooltip.d.total_spend)}</div>
           <div className="text-white/70">Imp. Sales: {fmtExact(tooltip.d.impactable_sales)}</div>
-          <div className="text-white/70">ROI: {tooltip.d.roi.toFixed(2)}</div>
+          <div className="text-white/70">ROI: {fmtROI(tooltip.d.roi)}</div>
           {tooltip.d.saturation_pct != null && (
             <div className="text-white/70">Saturation: {tooltip.d.saturation_pct.toFixed(1)}%</div>
           )}

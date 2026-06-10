@@ -11,7 +11,7 @@
  */
 import { useState, useMemo } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { getCategoryColor } from '@/utils/categories';
+import { getCategoryColor, fmtROI } from '@/utils/categories';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -134,7 +134,7 @@ export function ChannelRoiList({ channels }: ChannelRoiListProps) {
                 <div className="h-full rounded-sm transition-all duration-500"
                   style={{ width: `${(item.roi / maxRoi) * 100}%`, background: color, opacity: perfFilter === 'bottom10' ? 0.6 : 1 }} />
               </div>
-              <span className="text-[12px] font-semibold text-[var(--ink-900)] w-8 text-right tabular-nums flex-shrink-0">{item.roi.toFixed(2)}</span>
+              <span className="text-[12px] font-semibold text-[var(--ink-900)] w-12 text-right tabular-nums flex-shrink-0">{fmtROI(item.roi)}</span>
             </div>
           );
         })}

@@ -65,3 +65,15 @@ export function fmtCompact(v: number): string {
 export function fmtExact(v: number): string {
   return `$${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
+
+/**
+ * ROI display format. Two decimals for typical values; five decimals for
+ * sub-0.01 magnitudes so tiny coefficients (common when sales units dwarf
+ * spend) don't collapse to "0.00".
+ *
+ * @param {number} v - ROI value (impactable sales / spend, or coefficient).
+ * @returns {string} Formatted ROI string.
+ */
+export function fmtROI(v: number): string {
+  return v !== 0 && Math.abs(v) < 0.01 ? v.toFixed(5) : v.toFixed(2);
+}

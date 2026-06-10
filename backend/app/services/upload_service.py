@@ -400,6 +400,8 @@ class UploadService:
 
         # Also create ChannelParameter / SubchannelParameter rows so the Model
         # Summary can consume MODEL_FACT data through the channel parameter schema.
+        # model_channel_calculations table is unused — reports.py aggregates live
+        # from model_fact + data_fact, so no calc rows are precomputed here.
         await self._create_channel_params_from_model_fact(df, upload_id, cycle_id)
 
     async def _create_channel_params_from_model_fact(

@@ -9,27 +9,21 @@
  * color swatch per category.  Responsive via ResizeObserver.
  */
 import { useRef, useState, useEffect } from 'react';
+import { fmtCompact, fmtExact } from '@/utils/categories';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface SpendVsSalesBarChartProps {
-  /** Category-level data array — one entry per category. */
+  /** Category-level data array — one entry per category. Values in raw dollars. */
   data: Array<{
     name: string;
-    /** Total spend in $M */
+    /** Total spend in raw dollars */
     spend: number;
-    /** Total impactable sales in $M */
+    /** Total impactable sales in raw dollars */
     sales: number;
     /** Hex color for this category */
     color: string;
   }>;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fmt(v: number): string {
-  if (v >= 1) return `$${v.toFixed(0)}M`;
-  return `$${(v * 1000).toFixed(0)}K`;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -39,7 +33,7 @@ function fmt(v: number): string {
  *
  * Renders a two-bar grouped SVG chart of spend (hatched) vs impactable sales
  * (solid) per category.  Height tracks width via ResizeObserver at 40% ratio.
- * Hover tooltip shows exact $M values.
+ * Axis labels use fmtCompact; hover tooltip shows exact values via fmtExact.
  *
  * @param {SpendVsSalesBarChartProps} props
  */
@@ -94,7 +88,7 @@ export function SpendVsSalesBarChart({ data }: SpendVsSalesBarChartProps) {
         {yTicks.map((t) => (
           <g key={t}>
             <line x1={PAD.l} x2={W - PAD.r} y1={toY(t)} y2={toY(t)} stroke="#F4F4F5" strokeWidth="1" />
-            <text x={PAD.l - 6} y={toY(t) + 4} textAnchor="end" fontSize="9" fill="#A1A1AA">{fmt(t)}</text>
+            <text x={PAD.l - 6} y={toY(t) + 4} textAnchor="end" fontSize="9" fill="#A1A1AA">{fmtCompact(t)}</text>
           </g>
         ))}
         <line x1={PAD.l} x2={PAD.l} y1={PAD.t} y2={H - PAD.b} stroke="#D4D4D8" strokeWidth="1" />
@@ -107,11 +101,11 @@ export function SpendVsSalesBarChart({ data }: SpendVsSalesBarChartProps) {
             <g key={d.name}>
               <rect x={cx - barW - gap / 2} y={toY(d.spend)} width={barW} height={spendH} fill={`url(#hatch-svs-${d.name})`} stroke={d.color} strokeWidth="1" rx="2"
                 className="cursor-pointer opacity-80 hover:opacity-100 transition-opacity"
-                onMouseMove={(e) => { const r = containerRef.current?.getBoundingClientRect(); if (r) setTooltip({ x: e.clientX - r.left, y: e.clientY - r.top, text: `${d.name} — Spend: ${fmt(d.spend)}` }); }}
+                onMouseMove={(e) => { const r = containerRef.current?.getBoundingClientRect(); if (r) setTooltip({ x: e.clientX - r.left, y: e.clientY - r.top, text: `${d.name} — Spend: ${fmtExact(d.spend)}` }); }}
                 onMouseLeave={() => setTooltip(null)} />
               <rect x={cx + gap / 2} y={toY(d.sales)} width={barW} height={salesH} fill={d.color} rx="2"
                 className="cursor-pointer hover:opacity-80 transition-opacity"
-                onMouseMove={(e) => { const r = containerRef.current?.getBoundingClientRect(); if (r) setTooltip({ x: e.clientX - r.left, y: e.clientY - r.top, text: `${d.name} — Impactable Sales: ${fmt(d.sales)}` }); }}
+                onMouseMove={(e) => { const r = containerRef.current?.getBoundingClientRect(); if (r) setTooltip({ x: e.clientX - r.left, y: e.clientY - r.top, text: `${d.name} — Impactable Sales: ${fmtExact(d.sales)}` }); }}
                 onMouseLeave={() => setTooltip(null)} />
               <text x={cx} y={H - PAD.b + 14} textAnchor="middle" fontSize="9" fill="#52525B" fontWeight="500">
                 {d.name.length > 12 ? `${d.name.slice(0, 11)}…` : d.name}

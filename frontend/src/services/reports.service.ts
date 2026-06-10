@@ -191,9 +191,27 @@ export const reportsService = {
     };
   },
 
+  /**
+   * Fetches the legacy cycle-scoped model summary aggregation.
+   *
+   * Calls GET /reports/model-summary/{cycleId}. The Model Summary screen uses
+   * fetchModelSummary (filter-based) instead — this remains for cycle-keyed consumers.
+   *
+   * @param {string} cycleId - The cycle whose summary is being fetched.
+   * @returns {Promise<ModelSummaryOut>} Raw aggregated summary for the cycle.
+   * @throws Will throw if the API request fails.
+   */
   modelSummary: (cycleId: string) =>
     api.get<ModelSummaryOut>(`/reports/model-summary/${cycleId}`),
 
+  /**
+   * Fetches paginated DATA_FACT rows for a cycle with optional channel/category filters.
+   *
+   * @param {string} cycleId - The cycle to query.
+   * @param {object} [params] - Optional channel, category, page, and page_size filters.
+   * @returns {Promise<PaginatedResponse<DataFactRow>>} Paginated raw rows.
+   * @throws Will throw if the API request fails.
+   */
   dataHistory: (
     cycleId: string,
     params?: { channel?: string; category?: string; page?: number; page_size?: number },
@@ -209,6 +227,13 @@ export const reportsService = {
     );
   },
 
+  /**
+   * Fetches dashboard KPI totals, optionally scoped to a single cycle.
+   *
+   * @param {string} [cycleId] - Optional cycle to scope the KPIs to.
+   * @returns {Promise<DashboardKPIs>} Aggregate sales, spend, ROI, and counts.
+   * @throws Will throw if the API request fails.
+   */
   dashboard: (cycleId?: string) =>
     api.get<DashboardKPIs>(`/reports/dashboard${cycleId ? `?cycle_id=${cycleId}` : ''}`),
 

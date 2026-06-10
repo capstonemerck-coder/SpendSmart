@@ -236,7 +236,7 @@ export interface DataHistoryPage {
 }
 
 // ============================================================================
-// Scenario types
+// Scenario types (legacy frontend-only — kept for backward compat)
 // ============================================================================
 
 export interface Constraint {
@@ -259,6 +259,68 @@ export interface Scenario {
   targetSpend?: string;
   targetKPI?: string;
   targetValue?: string;
+}
+
+// ── Scenario Planning (API-backed) ───────────────────────────────────────────
+
+/** A single channel row in the scenario planning table, derived from model summary. */
+export interface ChannelPlanningRow {
+  channel_id: number;
+  channel_name: string;
+  subchannel_name?: string;
+  category: string;
+  current_spend: number;
+  proposed_spend: number;
+  current_roi: number;
+  /** Slider min value: percentage change allowed (-100 to 0). */
+  min_spend_pct: number;
+  /** Slider max value: percentage change allowed (0 to +100). */
+  max_spend_pct: number;
+}
+
+/** A scenario record as returned by the API and normalized by the service. */
+export interface SavedScenario {
+  scenario_id: number;
+  scenario_name: string;
+  cycle_id?: string;
+  scenario_type: string;
+  is_public: boolean;
+  /** Derived from is_pending: 'pending' | 'completed'. */
+  opt_status: string;
+  is_pending: boolean;
+  category_constraint?: string;
+  target_spend?: number;
+  target_kpi?: string;
+  target_value?: number;
+  created_at: string;
+  constraints: Array<{ channel_id: number; min_spend_pct: number; max_spend_pct: number }>;
+}
+
+/** Optimizer run status for a single scenario. */
+export interface OptimizerStatus {
+  scenario_id: number;
+  opt_status: 'draft' | 'running' | 'completed' | 'failed';
+  is_pending: boolean;
+  error_message?: string;
+}
+
+/** Parameters passed from the page to useScenarioPlanning.handleSaveScenario. */
+export interface SaveScenarioParams {
+  name: string;
+  scenario_type: 'Spend Based' | 'Goal Based';
+  is_public: boolean;
+  category_constraint?: string;
+  target_spend?: number;
+  target_kpi?: string;
+  target_value?: number;
+  constraints: ConstraintPayload[];
+}
+
+/** Channel-level constraint payload for creating or updating a scenario. */
+export interface ConstraintPayload {
+  channel_id: number;
+  min_spend_pct: number;
+  max_spend_pct: number;
 }
 
 // ============================================================================
