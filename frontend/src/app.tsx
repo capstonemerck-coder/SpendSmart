@@ -102,13 +102,7 @@ function AppShell() {
 
     switch (activeTab) {
       case 'SCENARIO PLANNING':
-        return (
-          <ScenarioPlanner
-            savedScenarios={savedScenarios}
-            setSavedScenarios={setSavedScenarios}
-            onViewOutcome={handleViewOutcome}
-          />
-        );
+        return <ScenarioPlanner onViewOutcome={handleViewOutcome} />;
       case 'SCENARIO OUTCOME':
         return (
           <ScenarioOutcome
