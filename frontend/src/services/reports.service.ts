@@ -11,6 +11,9 @@ import { api } from './api-client';
 import type {
   MetaData,
   ModelSummaryData,
+  ModelChannelCalc,
+  ChannelLevelCalc,
+  SubchannelLevelCalc,
   DataHistoryKPI,
   SpendTrendPoint,
   RevenueTrendPoint,
@@ -19,6 +22,7 @@ import type {
   DataHistoryPage,
 } from '../utils/types';
 
+/** Raw response shape from GET /reports/model-summary/{cycle_id}. */
 export interface ModelSummaryOut {
   cycle_id: string;
   total_sales: number;
@@ -99,6 +103,7 @@ export const reportsService = {
           current_spend: number;
           min_spend: number;
           max_spend: number;
+          category?: string | null;
         }>;
         cycle_id: string;
         uploaded_at: string;
@@ -115,25 +120,74 @@ export const reportsService = {
 
     if (!envelope.data) return null;
 
+    const subs = envelope.data.channels;
+    const cycleId = envelope.data.cycle_id;
+
+    // ── Category-level (channel_calculations) ──────────────────────────────
+    const catMap = new Map<string, { spend: number; sales: number; idx: number }>();
+    for (const s of subs) {
+      const cat = s.category ?? s.channel;
+      const cur = catMap.get(cat) ?? { spend: 0, sales: 0, idx: catMap.size };
+      cur.spend += s.current_spend;
+      cur.sales += s.current_spend * s.roi_coefficient;
+      catMap.set(cat, cur);
+    }
+    const channel_calculations: ModelChannelCalc[] = Array.from(catMap.entries()).map(
+      ([name, d]) => ({
+        cycle_id: cycleId,
+        channel_id: d.idx,
+        channel_name: name,
+        category: name,
+        total_spend: d.spend,
+        impactable_sales: d.sales,
+        total_sales: d.spend + d.sales,
+        roi: d.spend > 0 ? d.sales / d.spend : 0,
+      }),
+    );
+
+    // ── Channel-level (channel_level) ──────────────────────────────────────
+    const chMap = new Map<string, { category: string; spend: number; sales: number }>();
+    for (const s of subs) {
+      const cat = s.category ?? s.channel;
+      const key = `${cat}\x00${s.channel}`;
+      const cur = chMap.get(key) ?? { category: cat, spend: 0, sales: 0 };
+      cur.spend += s.current_spend;
+      cur.sales += s.current_spend * s.roi_coefficient;
+      chMap.set(key, cur);
+    }
+    const channel_level: ChannelLevelCalc[] = Array.from(chMap.entries()).map(([key, d]) => ({
+      channel_name: key.split('\x00')[1],
+      category: d.category,
+      total_spend: d.spend,
+      impactable_sales: d.sales,
+      total_sales: d.spend + d.sales,
+      roi: d.spend > 0 ? d.sales / d.spend : 0,
+    }));
+
+    // ── Subchannel-level (subchannel_level) ────────────────────────────────
+    const subchannel_level: SubchannelLevelCalc[] = subs.map((s) => ({
+      subchannel_name: s.sub_channel,
+      channel_name: s.channel,
+      category: s.category ?? s.channel,
+      total_spend: s.current_spend,
+      impactable_sales: s.current_spend * s.roi_coefficient,
+      total_sales: s.current_spend * s.roi_coefficient,
+      roi: s.roi_coefficient,
+      saturation_pct: null,
+    }));
+
     return {
-      baselineKpi: envelope.data.baseline_kpi,
-      channels: envelope.data.channels.map((ch) => ({
-        channel: ch.channel,
-        subChannel: ch.sub_channel,
-        roiCoefficient: ch.roi_coefficient,
-        currentSpend: ch.current_spend,
-        minSpend: ch.min_spend,
-        maxSpend: ch.max_spend,
-      })),
-      cycleId: envelope.data.cycle_id,
-      uploadedAt: envelope.data.uploaded_at,
-      totalSpend: envelope.data.total_spend,
-      totalSales: envelope.data.total_sales,
-      overallRoi: envelope.data.overall_roi,
-      totalBaseSales: envelope.data.total_base_sales,
-      totalIncrementalSales: envelope.data.total_incremental_sales,
-      basePct: envelope.data.base_pct,
-      incrementalPct: envelope.data.incremental_pct,
+      cycle_id: cycleId,
+      total_sales: envelope.data.total_sales,
+      total_spend: envelope.data.total_spend,
+      overall_roi: envelope.data.overall_roi,
+      base_sales: envelope.data.total_base_sales,
+      incremental_sales: envelope.data.total_incremental_sales,
+      base_pct: envelope.data.base_pct,
+      incremental_pct: envelope.data.incremental_pct,
+      channel_calculations,
+      channel_level,
+      subchannel_level,
     };
   },
 

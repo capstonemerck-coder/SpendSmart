@@ -51,3 +51,30 @@ export const exportToCSV = (rows: Array<Record<string, any>>, filename: string):
   link.click();
   document.body.removeChild(link);
 };
+
+/**
+ * Exports an HTML element as a PNG image and triggers a browser download.
+ * Requires html2canvas — install with `npm install html2canvas`.
+ * Logs a warning and no-ops gracefully when html2canvas is not available.
+ *
+ * @param {HTMLElement | null} element - DOM element to capture.
+ * @param {string} filename - Output filename without the .png extension.
+ * @returns {Promise<void>}
+ */
+export const exportToPNG = async (element: HTMLElement | null, filename: string): Promise<void> => {
+  if (!element) {
+    console.warn('exportToPNG: element is null — nothing to export');
+    return;
+  }
+  try {
+    // Dynamic import keeps the bundle clean; fails gracefully if not installed.
+    const { default: html2canvas } = await import('html2canvas');
+    const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+    const link = document.createElement('a');
+    link.download = `${filename}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  } catch {
+    console.warn('exportToPNG: html2canvas unavailable — run `npm install html2canvas` to enable PNG export');
+  }
+};

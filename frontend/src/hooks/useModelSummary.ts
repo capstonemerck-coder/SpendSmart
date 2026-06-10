@@ -1,16 +1,17 @@
 /**
  * useModelSummary.ts
  *
- * Manages data fetching and state for the Model Summary screen.
+ * Manages data fetching and loading state for the Model Summary screen.
+ * Fetches model summary data via reportsService.fetchModelSummary whenever
+ * the market, brand, or indication filter changes.
  *
- * Fetches channel/subchannel model parameters from GET /reports/model-summary
- * using the active market, brand, and indication filter values.  A new request
- * is issued whenever any of the three filters changes.
+ * The hook does NOT fire when any filter is missing — the page shows an
+ * empty state prompting the user to complete their filter selection.
+ * UI state (expand, sort, search) lives in the page component, not here.
  *
- * The hook does NOT fire the API when any filter is missing — the screen shows
- * an empty state prompting the user to complete their filter selection.
- *
- * Delegates all API communication to reportsService.fetchModelSummary.
+ * Delegates all API communication to reportsService.fetchModelSummary, which
+ * normalizes the flat subchannel response into channel_level, subchannel_level,
+ * and channel_calculations aggregations ready for chart consumption.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { reportsService } from '@/services/reports.service';
@@ -22,7 +23,7 @@ interface UseModelSummaryResult {
   summaryData: ModelSummaryData | null;
   isLoading: boolean;
   error: string | null;
-  /** Re-issues the current fetch — useful for the ErrorState retry affordance. */
+  /** Re-issues the current fetch — wired to ErrorState retry affordance. */
   refetch: () => void;
 }
 
@@ -31,9 +32,9 @@ interface UseModelSummaryResult {
 /**
  * useModelSummary
  *
- * Fetches model summary data from the API whenever the market, brand, or
- * indication filter changes.  Skips the request when any filter is null or
- * empty; in that case summaryData is null and isLoading is false.
+ * Fetches model summary data from the API whenever market, brand, or indication
+ * changes. Skips the request when any filter is null or empty; in that case
+ * summaryData is null and isLoading is false.
  *
  * @param {string | null} market - Selected market filter value.
  * @param {string | null} brand - Selected brand filter value.
@@ -57,19 +58,13 @@ export function useModelSummary(
       setError(null);
       return;
     }
-
     setIsLoading(true);
     setError(null);
-
     try {
-      const data = await reportsService.fetchModelSummary(
-        market!,
-        brand!,
-        indication!,
-      );
+      const data = await reportsService.fetchModelSummary(market!, brand!, indication!);
       setSummaryData(data);
-    } catch {
-      setError('Failed to load model summary. Please try again.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load model summary');
       setSummaryData(null);
     } finally {
       setIsLoading(false);

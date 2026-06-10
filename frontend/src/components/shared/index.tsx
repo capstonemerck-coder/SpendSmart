@@ -1,5 +1,5 @@
-import { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, forwardRef } from 'react';
-import { X } from 'lucide-react';
+import { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, forwardRef, useState } from 'react';
+import { X, Info } from 'lucide-react';
 
 /* ============================================================
    Card — primary surface used everywhere
@@ -302,6 +302,48 @@ export function KpiCard({
             {trend.positive ? '↑' : '↓'} {trend.value}
           </span>
         )}
+      </div>
+      {sub && <div className="text-[11px] text-[var(--ink-500)]">{sub}</div>}
+    </div>
+  );
+}
+
+/* ============================================================
+   KpiWithTooltip — KPI card with an info tooltip on the label
+   ============================================================ */
+export function KpiWithTooltip({
+  label,
+  value,
+  sub,
+  tooltip,
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: ReactNode;
+  /** Text shown in the tooltip when the ⓘ icon is hovered. */
+  tooltip: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="ui-card !rounded-lg !shadow-none px-5 py-4 flex flex-col gap-1.5">
+      <div className="flex items-center gap-1">
+        <div className="ui-eyebrow">{label}</div>
+        <div className="relative">
+          <Info
+            size={11}
+            className="text-[var(--ink-400)] cursor-help"
+            onMouseEnter={() => setShow(true)}
+            onMouseLeave={() => setShow(false)}
+          />
+          {show && (
+            <div className="absolute left-0 bottom-full mb-1.5 bg-[var(--ink-900)] text-white text-[10px] px-2.5 py-1.5 rounded-md shadow-xl z-30 whitespace-nowrap pointer-events-none max-w-[220px] leading-relaxed">
+              {tooltip}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="font-display text-[28px] leading-none font-semibold text-[var(--ink-900)]">
+        {value}
       </div>
       {sub && <div className="text-[11px] text-[var(--ink-500)]">{sub}</div>}
     </div>

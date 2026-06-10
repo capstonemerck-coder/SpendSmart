@@ -121,42 +121,73 @@ export interface MetaData {
   indication: string | null;
 }
 
-// ─── Model Summary ────────────────────────────────────────────────────────────
+// ── Model Summary ────────────────────────────────────────────────────────────
 
-/** Per-subchannel row returned by GET /reports/model-summary. */
-export interface SubChannelSummary {
-  channel: string;
-  subChannel: string;
-  roiCoefficient: number;
-  /**
-   * Actual spend from DATA_FACT (sum over cycle for this channel/subchannel).
-   * Falls back to SubchannelParameter.min_spend when no DATA_FACT rows exist.
-   */
-  currentSpend: number;
-  minSpend: number;
-  maxSpend: number;
+/** Category-level aggregation row — used for the bar chart and KPI cards. */
+export interface ModelChannelCalc {
+  cycle_id: string;
+  /** Positional index used as a stable key; not a real DB channel_id. */
+  channel_id: number;
+  /** Category name doubles as channel_name at this aggregation level. */
+  channel_name?: string;
+  category?: string;
+  total_sales?: number;
+  total_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
 }
 
-/** Normalized response from GET /reports/model-summary. */
+/** Channel-level aggregation (depth=1) — used for the ROI by Channel list. */
+export interface ChannelLevelCalc {
+  channel_name: string;
+  category: string;
+  total_sales: number;
+  total_spend: number;
+  impactable_sales: number;
+  roi: number;
+}
+
+/** Subchannel-level row (depth=2) — used for the scatter chart. */
+export interface SubchannelLevelCalc {
+  subchannel_name: string;
+  channel_name: string;
+  category: string;
+  total_sales: number;
+  total_spend: number;
+  impactable_sales: number;
+  roi: number;
+  saturation_pct?: number | null;
+}
+
+/**
+ * Full model summary response, normalized from GET /reports/model-summary.
+ * channel_calculations, channel_level, and subchannel_level are derived from
+ * the flat subchannel rows returned by the API and aggregated in the service.
+ */
 export interface ModelSummaryData {
-  baselineKpi: number;
-  channels: SubChannelSummary[];
-  cycleId: string;
-  uploadedAt: string;
-  /** Sum of currentSpend across all subchannels. */
-  totalSpend: number;
-  /** totalIncrementalSales + totalBaseSales. */
-  totalSales: number;
-  /** totalIncrementalSales / totalSpend; 0 when totalSpend is 0. */
-  overallRoi: number;
-  /** Sum of SubchannelParameter.base_sales; 0 when not from MODEL_FACT. */
-  totalBaseSales: number;
-  /** Sum of (currentSpend × roiCoefficient) — same value as baselineKpi. */
-  totalIncrementalSales: number;
-  /** totalBaseSales / totalSales × 100; 0 when totalSales is 0. */
-  basePct: number;
-  /** totalIncrementalSales / totalSales × 100; 100 when totalSales is 0. */
-  incrementalPct: number;
+  cycle_id: string;
+  total_sales: number;
+  total_spend: number;
+  overall_roi: number;
+  base_sales: number;
+  incremental_sales: number;
+  base_pct: number;
+  incremental_pct: number;
+  /** Category-level aggregations — used for SpendVsSalesBarChart. */
+  channel_calculations: ModelChannelCalc[];
+  /** Channel-level aggregations — used for ChannelRoiList. */
+  channel_level: ChannelLevelCalc[];
+  /** Subchannel-level rows — used for SubchannelScatterChart and the table. */
+  subchannel_level: SubchannelLevelCalc[];
+}
+
+/** Autocomplete result row for the channel contribution detail table search. */
+export interface ChannelSearchResult {
+  label: string;
+  sub?: string;
+  catKey: string;
+  chKey?: string;
+  type: 'category' | 'channel' | 'subchannel';
 }
 
 // ── Data History ──────────────────────────────────────────────────────────────
