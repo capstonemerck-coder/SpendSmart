@@ -5,7 +5,7 @@
  * Covers model summary (channel parameter based), data history, dashboard KPIs,
  * metadata fetching, data-fact variable discovery, and all Data History screen
  * endpoints (cycle listing, KPI summary, spend/revenue trends, channel breakdown).
- * All responses are typed and normalized to camelCase before being returned to hooks.
+ * All response types are defined in utils/types.ts.
  */
 import { api } from './api-client';
 import type {
@@ -20,57 +20,11 @@ import type {
   ChannelBreakdownRow,
   DataHistoryParams,
   DataHistoryPage,
-} from '../utils/types';
-
-/** Raw response shape from GET /reports/model-summary/{cycle_id}. */
-export interface ModelSummaryOut {
-  cycle_id: string;
-  total_sales: number;
-  total_spend: number;
-  overall_roi: number;
-  base_sales: number;
-  incremental_sales: number;
-  base_pct: number;
-  incremental_pct: number;
-  channel_calculations: Array<{
-    cycle_id: string;
-    channel_id: number;
-    channel_name?: string;
-    total_sales?: number;
-    total_spend?: number;
-    impactable_sales?: number;
-    roi?: number;
-  }>;
-}
-
-export interface DataFactRow {
-  id: number;
-  cycle_id: string;
-  date?: string;
-  category?: string;
-  channel?: string;
-  sub_channel?: string;
-  variable?: string;
-  spend?: number;
-  reach?: number;
-  value?: number;
-}
-
-export interface PaginatedResponse<T> {
-  total: number;
-  page: number;
-  page_size: number;
-  items: T[];
-}
-
-export interface DashboardKPIs {
-  total_sales: number;
-  total_spend: number;
-  overall_roi: number;
-  scenario_count: number;
-  upload_count: number;
-  active_cycle_id?: string;
-}
+  ModelSummaryOut,
+  DataFactRow,
+  PaginatedResponse,
+  DashboardKPIs,
+} from '@/utils/types';
 
 export const reportsService = {
   /**
@@ -192,10 +146,7 @@ export const reportsService = {
   },
 
   /**
-   * Fetches the legacy cycle-scoped model summary aggregation.
-   *
-   * Calls GET /reports/model-summary/{cycleId}. The Model Summary screen uses
-   * fetchModelSummary (filter-based) instead — this remains for cycle-keyed consumers.
+   * Fetches the cycle-scoped model summary aggregation.
    *
    * @param {string} cycleId - The cycle whose summary is being fetched.
    * @returns {Promise<ModelSummaryOut>} Raw aggregated summary for the cycle.
@@ -239,7 +190,6 @@ export const reportsService = {
 
   /**
    * Fetch all MetaData rows for cascading filter dropdowns (Market, Brand, Indication).
-   * Frontend derives filtering logic from this flat list.
    *
    * @returns {Promise<MetaData[]>} Array of all metadata rows.
    * @throws Will throw if the API request fails.
@@ -248,7 +198,6 @@ export const reportsService = {
 
   /**
    * Fetch distinct variable values from DATA_FACT for a given cycle.
-   * Used to populate the searchable variable grid on the Target Variable selection screen.
    *
    * @param {string} cycleId - The cycle for which to fetch variables.
    * @returns {Promise<string[]>} Sorted array of distinct variable names.
@@ -259,7 +208,6 @@ export const reportsService = {
 
   /**
    * Fetch available cycle IDs, most recent first.
-   * Used to populate the cycle selector on the Data History screen.
    *
    * @param {number | null} metadataId - Optional metadata context filter.
    * @returns {Promise<string[]>} Ordered list of cycle ID strings.
@@ -282,7 +230,6 @@ export const reportsService = {
 
   /**
    * Fetch daily spend trend data for a cycle.
-   * Each point represents total spend across all channels for that date.
    *
    * @param {string} cycleId - The cycle to fetch trend for.
    * @returns {Promise<SpendTrendPoint[]>} Chronologically ordered spend points.
@@ -293,7 +240,6 @@ export const reportsService = {
 
   /**
    * Fetch daily revenue trend data for a cycle.
-   * Each point represents total value (sales) across all channels for that date.
    *
    * @param {string} cycleId - The cycle to fetch trend for.
    * @returns {Promise<RevenueTrendPoint[]>} Chronologically ordered revenue points.
@@ -304,7 +250,6 @@ export const reportsService = {
 
   /**
    * Fetch channel spend vs reach breakdown for a cycle.
-   * Returns rows sorted by efficiency ratio (reach/spend) descending.
    *
    * @param {string} cycleId - The cycle to analyze.
    * @returns {Promise<ChannelBreakdownRow[]>} Per-channel breakdown sorted by ratio desc.
@@ -315,8 +260,6 @@ export const reportsService = {
 
   /**
    * Fetch distinct channel values from DATA_FACT for a given cycle.
-   * Used to populate the channel constraint list in the New Scenario modal.
-   * Only channels with uploaded raw data are returned.
    *
    * @param {string} cycleId - The cycle for which to fetch channels.
    * @returns {Promise<string[]>} Sorted array of distinct channel names.
@@ -327,7 +270,6 @@ export const reportsService = {
 
   /**
    * Fetch paginated DATA_FACT rows for a cycle.
-   * Normalizes the API's snake_case pagination keys to camelCase.
    *
    * @param {string} cycleId - The cycle to query.
    * @param {DataHistoryParams} params - Pagination parameters (page, pageSize).

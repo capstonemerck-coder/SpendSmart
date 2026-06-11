@@ -1,9 +1,9 @@
 /**
- * RoiComparisonChart
+ * RoiComparisonChart.tsx
  *
- * Horizontal bar chart showing ROI coefficient per channel.
- * Used in the Scenario Planning screen to display baseline model ROI
- * so analysts can make informed spend allocation decisions.
+ * Renders an SVG bar chart showing current ROI per channel.
+ * Used on the Scenario Planning screen alongside SpendComparisonChart.
+ * Colors are derived from getCategoryColor — no local color map.
  *
  * @param {RoiComparisonChartProps} props
  */
@@ -11,13 +11,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import { fmtROI, getCategoryColor } from '@/utils/categories';
+import type { ChannelPlanningRow } from '@/utils/types';
 
 interface RoiComparisonChartProps {
-  data: Array<{
-    name: string;
-    roi: number;
-    category?: string;
-  }>;
+  /** Channel planning rows — uses channel_name, current_roi, category. */
+  rows: ChannelPlanningRow[];
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -34,42 +32,31 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 /**
  * RoiComparisonChart
  *
- * Renders a vertical bar chart of ROI by channel. Bars are colored by
- * category using getCategoryColor. ROI values are formatted with fmtROI
- * (5 decimal places when |v| < 0.01 so tiny MMM coefficients stay visible).
+ * Renders a vertical bar chart of baseline ROI by channel.
+ * Bars are colored by category using getCategoryColor.
+ * ROI values are formatted with fmtROI.
  *
  * @param {RoiComparisonChartProps} props
  */
-export function RoiComparisonChart({ data }: RoiComparisonChartProps) {
-  if (!data.length) {
-    return (
-      <div className="h-48 flex items-center justify-center text-[12.5px] text-[var(--ink-400)]">
-        No channel data available
-      </div>
-    );
-  }
+export function RoiComparisonChart({ rows }: RoiComparisonChartProps) {
+  if (!rows.length) return null;
+
+  const data = rows.map(r => ({
+    name: r.channel_name.slice(0, 8),
+    roi: r.current_roi,
+    category: r.category,
+  }));
 
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: 8, bottom: 4 }} barSize={22}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-        <XAxis
-          dataKey="name"
-          tick={{ fontSize: 11, fill: 'var(--ink-500)' }}
-          axisLine={false}
-          tickLine={false}
-        />
-        <YAxis
-          tickFormatter={(t) => fmtROI(t)}
-          tick={{ fontSize: 11, fill: 'var(--ink-500)' }}
-          axisLine={false}
-          tickLine={false}
-          width={52}
-        />
+        <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--ink-500)' }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={fmtROI} tick={{ fontSize: 11, fill: 'var(--ink-500)' }} axisLine={false} tickLine={false} width={52} />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--surface-muted)' }} />
         <Bar dataKey="roi" name="ROI" radius={[2, 2, 0, 0]}>
           {data.map((entry, idx) => (
-            <Cell key={`cell-${idx}`} fill={getCategoryColor(entry.category ?? entry.name)} />
+            <Cell key={`cell-${idx}`} fill={getCategoryColor(entry.category)} />
           ))}
         </Bar>
       </BarChart>

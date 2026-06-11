@@ -2,67 +2,16 @@
  * scenarios.service.ts
  *
  * Handles all API communication for the Scenario Planning module.
- * Covers listing, creating, updating, deleting, running, and fetching
- * outcomes for optimization scenarios. All methods return typed responses
- * exactly as the backend sends them — normalization happens in the hook.
+ * Covers listing, creating, updating, deleting, running, and polling scenarios.
+ * All types are defined in utils/types.ts.
  */
 import { api } from './api-client';
-
-export interface ConstraintIn {
-  channel_id: number;
-  min_spend_pct: number;
-  max_spend_pct: number;
-}
-
-export interface ScenarioCreate {
-  scenario_name: string;
-  cycle_id?: string;
-  scenario_type: 'Spend Based' | 'Goal Based';
-  is_public?: boolean;
-  category_constraint?: string;
-  target_spend?: number;
-  target_kpi?: string;
-  target_value?: number;
-  constraints?: ConstraintIn[];
-}
-
-/** Partial update payload — all fields optional. */
-export type ScenarioUpdate = Partial<ScenarioCreate>;
-
-export interface ScenarioOut {
-  scenario_id: number;
-  scenario_name: string;
-  cycle_id?: string;
-  scenario_type: string;
-  is_public: boolean;
-  target_spend?: number;
-  target_kpi?: string;
-  target_value?: number;
-  is_pending: boolean;
-  category_constraint?: string;
-  created_at: string;
-  updated_at: string;
-  constraints: ConstraintIn[];
-}
-
-export interface ScenarioOutcomeOut {
-  scenario_id: number;
-  scenario_name?: string;
-  scenario_type?: string;
-  total_sales?: number;
-  total_spend?: number;
-  impactable_sales?: number;
-  roi?: number;
-  mroi?: number;
-  channel_results: Array<{
-    channel_id: number;
-    channel_name?: string;
-    optimized_spend?: number;
-    impactable_sales?: number;
-    roi?: number;
-    mroi?: number;
-  }>;
-}
+import type {
+  ScenarioOut,
+  ScenarioCreate,
+  ScenarioUpdate,
+  ScenarioOutcomeOut,
+} from '@/utils/types';
 
 export const scenarioService = {
   /**
@@ -114,16 +63,27 @@ export const scenarioService = {
   delete: (id: number) => api.delete(`/scenarios/${id}`),
 
   /**
-   * Submits a scenario to the optimizer. The call is synchronous — the
-   * optimizer runs in-process and returns once complete. Poll GET /scenarios/{id}
-   * to track is_pending → false.
+   * Polls optimization status for a scenario.
+   * opt_status: draft | running | completed | failed
    *
    * @param {number} id - Scenario primary key.
-   * @returns {Promise<{ status: string; converged: boolean; outcome: Record<string, number> }>}
+   * @returns {Promise<{ scenario_id, opt_status, is_pending, error_message? }>}
+   * @throws Will throw if the API request fails.
+   */
+  getStatus: (id: number) =>
+    api.get<{ scenario_id: number; opt_status: string; is_pending: boolean; error_message?: string }>(
+      `/scenarios/${id}/status`,
+    ),
+
+  /**
+   * Submits a scenario to the optimizer.
+   *
+   * @param {number} id - Scenario primary key.
+   * @returns {Promise<{ status, scenario_id, message }>}
    * @throws Will throw if the optimizer fails or the API request fails.
    */
   run: (id: number) =>
-    api.post<{ status: string; converged: boolean; outcome: Record<string, number> }>(
+    api.post<{ status: string; scenario_id: number; message: string }>(
       `/scenarios/${id}/run`,
     ),
 

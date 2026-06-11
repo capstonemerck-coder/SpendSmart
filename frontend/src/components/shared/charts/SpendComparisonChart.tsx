@@ -1,22 +1,21 @@
 /**
- * SpendComparisonChart
+ * SpendComparisonChart.tsx
  *
- * Grouped horizontal bar chart comparing current spend vs proposed spend
- * per channel for a scenario planning session. Expects raw dollar values.
+ * Renders a grouped bar chart comparing current vs proposed spend per channel.
+ * Used on the Scenario Planning screen to visualise the impact of spend changes.
+ * Colors are derived from getCategoryColor — no local color map.
  *
  * @param {SpendComparisonChartProps} props
  */
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from 'recharts';
-import { fmtCompact, fmtExact } from '@/utils/categories';
+import { getCategoryColor, fmtCompact, fmtExact } from '@/utils/categories';
+import type { ChannelPlanningRow } from '@/utils/types';
 
 interface SpendComparisonChartProps {
-  data: Array<{
-    name: string;
-    current: number;
-    proposed: number;
-  }>;
+  /** Channel planning rows — uses channel_name, current_spend, proposed_spend, category. */
+  rows: ChannelPlanningRow[];
 }
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -39,44 +38,43 @@ const CustomTooltip = ({ active, payload, label }: any) => {
  * SpendComparisonChart
  *
  * Renders a grouped bar chart showing current vs proposed spend by channel.
- * Pass raw dollar values — the chart handles compact axis formatting internally.
+ * Current spend bars are faded (opacity 0.35); proposed bars are solid.
+ * Bar color is derived from getCategoryColor for the channel's category.
  *
  * @param {SpendComparisonChartProps} props
  */
-export function SpendComparisonChart({ data }: SpendComparisonChartProps) {
-  if (!data.length) {
-    return (
-      <div className="h-48 flex items-center justify-center text-[12.5px] text-[var(--ink-400)]">
-        No channel data available
-      </div>
-    );
-  }
+export function SpendComparisonChart({ rows }: SpendComparisonChartProps) {
+  if (!rows.length) return null;
+
+  const data = rows.map(r => ({
+    name: r.channel_name.slice(0, 8),
+    current: r.current_spend,
+    proposed: r.proposed_spend,
+    category: r.category,
+  }));
 
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: 8, bottom: 4 }} barSize={14} barGap={3}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-        <XAxis
-          dataKey="name"
-          tick={{ fontSize: 11, fill: 'var(--ink-500)' }}
-          axisLine={false}
-          tickLine={false}
-        />
-        <YAxis
-          tickFormatter={(t) => fmtCompact(t)}
-          tick={{ fontSize: 11, fill: 'var(--ink-500)' }}
-          axisLine={false}
-          tickLine={false}
-          width={52}
-        />
+        <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--ink-500)' }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={fmtCompact} tick={{ fontSize: 11, fill: 'var(--ink-500)' }} axisLine={false} tickLine={false} width={52} />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--surface-muted)' }} />
         <Legend
-          iconType="square"
-          iconSize={9}
+          iconType="square" iconSize={9}
           wrapperStyle={{ fontSize: 11, color: 'var(--ink-500)', paddingTop: 8 }}
+          formatter={(value) => value === 'current' ? 'Current' : 'Proposed'}
         />
-        <Bar dataKey="current" name="Current" fill="var(--ink-300)" radius={[2, 2, 0, 0]} />
-        <Bar dataKey="proposed" name="Proposed" fill="var(--brand)" radius={[2, 2, 0, 0]} />
+        <Bar dataKey="current" name="current" radius={[2, 2, 0, 0]}>
+          {data.map((entry, idx) => (
+            <Cell key={`cur-${idx}`} fill={getCategoryColor(entry.category)} opacity={0.35} />
+          ))}
+        </Bar>
+        <Bar dataKey="proposed" name="proposed" radius={[2, 2, 0, 0]}>
+          {data.map((entry, idx) => (
+            <Cell key={`pro-${idx}`} fill={getCategoryColor(entry.category)} />
+          ))}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );

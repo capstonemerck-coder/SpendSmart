@@ -306,14 +306,15 @@ export interface OptimizerStatus {
 
 /** Parameters passed from the page to useScenarioPlanning.handleSaveScenario. */
 export interface SaveScenarioParams {
-  name: string;
-  scenario_type: 'Spend Based' | 'Goal Based';
-  is_public: boolean;
-  category_constraint?: string;
-  target_spend?: number;
-  target_kpi?: string;
-  target_value?: number;
-  constraints: ConstraintPayload[];
+  scenarioName: string;
+  cycleId: string;
+  scenarioType: 'Spend Based' | 'Goal Based';
+  isPublic: boolean;
+  selectedCategories: string[];
+  targetSpend: string;
+  targetKPI: string;
+  targetValue: string;
+  constraintRows: ChannelPlanningRow[];
 }
 
 /** Channel-level constraint payload for creating or updating a scenario. */
@@ -434,4 +435,160 @@ export interface User {
   is_active: boolean;
   created_at: string;
   permissions: string[];
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+
+/** Category-level aggregation row from the model summary endpoint. */
+export interface ChannelCalc {
+  cycle_id: string;
+  channel_id: number;
+  channel_name?: string;
+  category?: string;
+  total_sales?: number;
+  total_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+}
+
+/** Full model summary response from GET /reports/model-summary/{cycleId}. */
+export interface ModelSummaryOut {
+  cycle_id: string;
+  total_sales: number;
+  total_spend: number;
+  overall_roi: number;
+  base_sales: number;
+  incremental_sales: number;
+  base_pct: number;
+  incremental_pct: number;
+  /** Category-level — for bar chart and top KPIs */
+  channel_calculations: ChannelCalc[];
+  /** Channel-level (depth=1) — for "Channels by ROI" */
+  channel_level: ChannelLevelCalc[];
+  /** Subchannel-level (depth=2) — for scatter chart + saturation */
+  subchannel_level: SubchannelLevelCalc[];
+}
+
+/** Generic paginated response wrapper. */
+export interface PaginatedResponse<T = DataFactRow> {
+  total: number;
+  page: number;
+  page_size: number;
+  items: T[];
+}
+
+/** Dashboard KPI summary from GET /reports/dashboard. */
+export interface DashboardKPIs {
+  total_sales: number;
+  total_spend: number;
+  overall_roi: number;
+  impactable_sales?: number;
+  incremental_sales?: number;
+  spend_ratio?: number;
+  scenario_count: number;
+  upload_count: number;
+  active_cycle_id?: string;
+}
+
+// ── Scenarios (API-backed) ────────────────────────────────────────────────────
+
+/** Constraint payload sent to the API when creating or updating a scenario. */
+export interface ConstraintIn {
+  channel_id: number;
+  min_spend_pct: number;
+  max_spend_pct: number;
+}
+
+/** Payload for POST /scenarios (create scenario). */
+export interface ScenarioCreate {
+  scenario_name: string;
+  cycle_id?: string;
+  scenario_type: 'Spend Based' | 'Goal Based';
+  is_public?: boolean;
+  category_constraint?: string;
+  target_spend?: number;
+  target_kpi?: string;
+  target_value?: number;
+  constraints?: ConstraintIn[];
+}
+
+/** Payload for PATCH /scenarios/{id} (update scenario). */
+export interface ScenarioUpdate {
+  scenario_name?: string;
+  scenario_type?: string;
+  is_public?: boolean;
+  category_constraint?: string;
+  target_spend?: number;
+  target_kpi?: string;
+  target_value?: number;
+  is_pending?: boolean;
+  constraints?: ConstraintIn[];
+}
+
+/** Raw API shape returned by GET/POST /scenarios. */
+export interface ScenarioOut {
+  scenario_id: number;
+  scenario_name: string;
+  cycle_id?: string;
+  scenario_type: string;
+  is_public: boolean;
+  target_spend?: number;
+  target_kpi?: string;
+  target_value?: number;
+  is_pending: boolean;
+  category_constraint?: string;
+  created_at: string;
+  updated_at: string;
+  constraints: ConstraintIn[];
+}
+
+/** A single channel result row nested inside an outcome group. */
+export interface ChannelResult {
+  channel_id: number;
+  channel_name?: string;
+  category?: string;
+  optimized_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+}
+
+/** Channel-level group in the scenario outcome hierarchy. */
+export interface ChannelGroup {
+  channel_id: number;
+  channel_name?: string;
+  category?: string;
+  depth: number;
+  optimized_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+  sub_channels: SubChannelResult[];
+}
+
+/** Category-level group in the scenario outcome hierarchy. */
+export interface CategoryGroup {
+  channel_id: number;
+  channel_name?: string;
+  category?: string;
+  depth: number;
+  optimized_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+  channels: ChannelGroup[];
+}
+
+/** Full outcome response from GET /scenarios/{id}/outcome. */
+export interface ScenarioOutcomeOut {
+  scenario_id: number;
+  scenario_name?: string;
+  scenario_type?: string;
+  total_sales?: number;
+  total_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+  channel_results: ChannelResult[];
+  grouped_results: CategoryGroup[];
 }

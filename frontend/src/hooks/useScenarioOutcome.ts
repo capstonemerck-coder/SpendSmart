@@ -9,8 +9,8 @@
  * Cancels in-flight requests on scenarioId change or component unmount.
  */
 import { useState, useEffect } from 'react';
-import { scenarioService, type ScenarioOutcomeOut } from '@/services/scenarios.service';
-import type { ScenarioOutcomeData, CategoryGroupResult } from '@/utils/types';
+import { scenarioService } from '@/services/scenarios.service';
+import type { ScenarioOutcomeOut, ScenarioOutcomeData, CategoryGroupResult } from '@/utils/types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
