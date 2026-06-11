@@ -4,9 +4,9 @@
  * Scenario Planning screen — lets analysts create spend optimization scenarios,
  * set per-channel constraints, run the optimizer, and navigate to outcomes.
  *
- * Page owns cycle selection and modal/form UI state; all server state
- * (channel rows, scenarios, dashboard KPIs, optimizer run/poll) lives in
- * useScenarioPlanning.
+ * Cycle selection lives in FilterBar/FilterContext (Market → Brand → Indication → Cycle).
+ * Page owns modal/form UI state; all server state (channel rows, scenarios, dashboard KPIs,
+ * optimizer run/poll, DATA_FACT channels) lives in useScenarioPlanning.
  */
 import { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, Play, ChevronRight, RefreshCw, Loader2 } from 'lucide-react';
@@ -22,7 +22,6 @@ import { SpendComparisonChart } from '@/components/shared/charts/SpendComparison
 import { RoiComparisonChart } from '@/components/shared/charts/RoiComparisonChart';
 import { useFilters } from '@/context/FilterContext';
 import { useScenarioPlanning } from '@/hooks/useScenarioPlanning';
-import { reportsService } from '@/services/reports.service';
 import { fmtCompact, fmtROI } from '@/utils/categories';
 import type { ChannelPlanningRow } from '@/utils/types';
 
@@ -131,13 +130,9 @@ function ChannelPlanningTable({ rows, editable = false, onSliderChange }: {
 export default function ScenarioPlanner({ onViewOutcome }: ScenarioPlannerProps) {
   const { filters } = useFilters();
 
-  const [cycles, setCycles] = useState<string[]>([]);
-  const [cycleId, setCycleId] = useState<string | null>(null);
-  useEffect(() => {
-    reportsService.fetchAvailableCycles(filters.metadataId)
-      .then((cs) => { setCycles(cs); if (cs.length && !cycleId) setCycleId(cs[0]); })
-      .catch(() => {});
-  }, [filters.metadataId]);
+  // Cycle selection lives in FilterBar/FilterContext — the four-step cascade
+  // (Market → Brand → Indication → Cycle) is the single source of truth.
+  const cycleId = filters.cycle;
 
   const hook = useScenarioPlanning(cycleId);
 
@@ -178,6 +173,11 @@ export default function ScenarioPlanner({ onViewOutcome }: ScenarioPlannerProps)
   };
 
   const handleSaveCreate = async () => {
+    // Use createModalRows (DATA_FACT channels) as the constraint source.
+    // Filter out sentinel IDs (< 0) assigned to channels with no model summary entry.
+    const constraints = hook.createModalRows
+      .filter((r) => r.channel_id >= 0)
+      .map((r) => ({ channel_id: r.channel_id, min_spend_pct: r.min_spend_pct, max_spend_pct: r.max_spend_pct }));
     const id = await hook.handleSaveScenario({
       name: scenarioName.trim() || `Scenario ${hook.savedScenarios.length + 1}`,
       scenario_type: scenarioType,
@@ -185,7 +185,7 @@ export default function ScenarioPlanner({ onViewOutcome }: ScenarioPlannerProps)
       target_spend: scenarioType === 'Spend Based' ? (parseFloat(targetSpend) || undefined) : undefined,
       target_kpi: scenarioType === 'Goal Based' ? targetKpi : undefined,
       target_value: scenarioType === 'Goal Based' ? (parseFloat(targetValue) || undefined) : undefined,
-      constraints: hook.planningRows.map((r) => ({ channel_id: r.channel_id, min_spend_pct: r.min_spend_pct, max_spend_pct: r.max_spend_pct })),
+      constraints,
     });
     if (id !== null) setCreateOpen(false);
   };
@@ -209,11 +209,6 @@ export default function ScenarioPlanner({ onViewOutcome }: ScenarioPlannerProps)
     <PageContainer>
       <PageHeader eyebrow="Scenario Planning" title="Build & optimize scenarios"
         description="Create spend scenarios, set channel constraints, and run the optimizer."
-        actions={cycles.length > 1 ? (
-          <Select value={cycleId ?? ''} onChange={(e) => setCycleId(e.target.value)} className="h-9 text-[13px] min-w-[160px]">
-            {cycles.map((c) => <option key={c} value={c}>{c}</option>)}
-          </Select>
-        ) : undefined}
       />
 
       {hook.apiError && (
@@ -224,7 +219,7 @@ export default function ScenarioPlanner({ onViewOutcome }: ScenarioPlannerProps)
       )}
 
       {!cycleId ? (
-        <EmptyState title="Select a cycle" message="Choose filter options above to load planning data for a cycle." />
+        <EmptyState title="Select a cycle" message="Use the filter bar above to select Market → Brand → Indication → Cycle." />
       ) : hook.loadingChannels ? (
         <LoadingState message="Loading cycle data…" />
       ) : (
@@ -302,9 +297,13 @@ export default function ScenarioPlanner({ onViewOutcome }: ScenarioPlannerProps)
         </div>
       )}
 
-      {/* Create modal */}
+      {/* Create modal — footer has Reset Constraints (clears sliders) + Save.
+          The × button in the modal header (rendered by Modal) closes the modal. */}
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New scenario" size="xl"
-        footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancel</Button><Button onClick={handleSaveCreate}>Save scenario</Button></>}
+        footer={<>
+          <Button variant="secondary" onClick={hook.handleResetAll}>Reset Constraints</Button>
+          <Button onClick={handleSaveCreate}>Save scenario</Button>
+        </>}
       >
         {showHelp ? <HelpMeChoose onSelect={(t) => setScenarioType(t)} onClose={() => setShowHelp(false)} /> : (
           <div className="p-6 space-y-5">
@@ -331,7 +330,16 @@ export default function ScenarioPlanner({ onViewOutcome }: ScenarioPlannerProps)
             <Field label="Visibility"><div className="flex gap-2">{visBtn(isPublic, 'Public')}{visBtn(!isPublic, 'Private')}</div></Field>
             <div>
               <p className="ui-eyebrow text-[var(--ink-500)] mb-2.5">Channel constraints</p>
-              <ChannelPlanningTable rows={hook.planningRows} editable onSliderChange={hook.handleSliderChange} />
+              {hook.dataFactChannelsLoading ? (
+                <LoadingState message="Loading channel data…" />
+              ) : hook.dataFactChannelsError || hook.createModalRows.length === 0 ? (
+                <EmptyState
+                  title="No channel data"
+                  message="No channel data found for the selected cycle. Upload a DATA_FACT file first."
+                />
+              ) : (
+                <ChannelPlanningTable rows={hook.createModalRows} editable onSliderChange={hook.handleSliderChange} />
+              )}
             </div>
           </div>
         )}

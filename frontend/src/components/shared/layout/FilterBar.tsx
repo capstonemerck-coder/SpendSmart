@@ -4,14 +4,10 @@
  * Persistent filter strip rendered in the app shell for DATA HISTORY,
  * MODEL SUMMARY, SCENARIO PLANNING, SCENARIO OUTCOME, and SCENARIO COMPARISONS tabs.
  *
- * Market, Brand, and Indication are driven by FilterContext — they share state
- * with the inline dropdowns on the Data Input page and persist across navigation.
- * Options are fetched once on FilterProvider mount (GET /reports/metadata) and
- * derived via cascading logic inside FilterContext.
- *
- * Cycle is page-local state (not in FilterContext — Data History derives cycle
- * from uploaded files). Pass `cycleOptions` as a prop to show the Cycle filter.
- * Wiring the selected cycle to DataHistory's cycle list display is pending.
+ * All four filters (Market → Brand → Indication → Cycle) are driven by FilterContext
+ * and persist across navigation. Cycle options are fetched from the API when Indication
+ * is selected (metadataId resolves) and the dropdown is disabled until all three upstream
+ * filters are set. An optional Scenario filter is available for the Scenario Outcome tab.
  */
 import { useState } from 'react';
 import { Filter } from 'lucide-react';
@@ -24,10 +20,6 @@ interface FilterBarProps {
   showScenarioFilter?: boolean;
   scenarioOptions?: string[];
   defaultScenario?: string;
-  /** Optional list of cycle IDs to populate the local Cycle filter. Pass the
-   *  `availableCycles` array from `useDataHistory` when the cycle filter should
-   *  be shown and wired to Data History's cycle display. */
-  cycleOptions?: string[];
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -35,9 +27,10 @@ interface FilterBarProps {
 /**
  * FilterBar
  *
- * Renders the Market → Brand → Indication cascade wired to FilterContext,
- * plus an optional local Cycle filter and an optional Scenario filter.
- * Calls FilterContext setters directly on each change (no Apply batching).
+ * Renders the Market → Brand → Indication → Cycle cascade wired to FilterContext.
+ * Each dropdown is disabled until its upstream selections are made. Cycle clears
+ * automatically when Indication changes. An optional Scenario filter is shown on
+ * the Scenario Outcome tab via the showScenarioFilter prop.
  *
  * @param {FilterBarProps} props
  */
@@ -45,25 +38,21 @@ export function FilterBar({
   showScenarioFilter,
   scenarioOptions = [],
   defaultScenario,
-  cycleOptions = [],
 }: FilterBarProps) {
-  const { filters, options, setMarket, setBrand, setIndication } = useFilters();
+  const { filters, options, setMarket, setBrand, setIndication, setCycle } = useFilters();
 
-  // Cycle is page-local — it doesn't exist in FilterContext because Data History
-  // derives cycle from uploaded files, not a user filter selection.
-  const [selectedCycle, setSelectedCycle] = useState('');
+  // Scenario is local — it only concerns Scenario Outcome's own display, not shared state.
   const [scenario, setScenario] = useState(defaultScenario || scenarioOptions[0] || '');
 
   /**
-   * Resets all FilterContext selections (cascades: clears brand, indication,
-   * and metadataId automatically via FilterContext) plus the local cycle state.
+   * Resets all FilterContext selections. setMarket(null) cascades to clear brand,
+   * indication, metadataId, and cycle automatically via FilterContext.
    */
   const handleReset = () => {
     setMarket(null);
-    setSelectedCycle('');
   };
 
-  const hasSelection = !!filters.market || !!selectedCycle;
+  const hasSelection = !!filters.market || !!filters.cycle;
 
   return (
     <div className="bg-white border-b border-[var(--border)]">
@@ -132,22 +121,26 @@ export function FilterBar({
             </Select>
           </div>
 
-          {/* Cycle — local state; visible only when cycleOptions are provided.
-              TODO: wire selectedCycle to DataHistory's cycle display once the
-              prop is passed from App.tsx (requires lifting availableCycles up). */}
-          {cycleOptions.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-[11.5px] text-[var(--ink-500)] font-medium">Cycle</span>
-              <Select
-                value={selectedCycle}
-                onChange={(e) => setSelectedCycle(e.target.value)}
-                className="!h-8 !py-0 !text-[12px] !pr-7 min-w-[110px]"
-              >
-                <option value="">All Cycles</option>
-                {cycleOptions.map((c) => <option key={c}>{c}</option>)}
-              </Select>
-            </div>
-          )}
+          {/* Cycle — cascades from Indication via FilterContext; options fetched from
+              GET /reports/cycles?metadata_id=<id> when indication is selected. */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11.5px] text-[var(--ink-500)] font-medium">Cycle</span>
+            <Select
+              value={filters.cycle ?? ''}
+              onChange={(e) => setCycle(e.target.value || null)}
+              disabled={!filters.indication || options.cyclesLoading}
+              className="!h-8 !py-0 !text-[12px] !pr-7 min-w-[110px]"
+            >
+              <option value="">
+                {!filters.indication
+                  ? 'Select indication first'
+                  : options.cyclesLoading
+                  ? 'Loading…'
+                  : 'All Cycles'}
+              </option>
+              {options.cycles.map((c) => <option key={c}>{c}</option>)}
+            </Select>
+          </div>
 
           {/* Scenario filter — optional, shown on Scenario Outcome tab */}
           {showScenarioFilter && scenarioOptions.length > 0 && (

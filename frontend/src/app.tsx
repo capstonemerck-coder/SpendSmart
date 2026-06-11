@@ -104,12 +104,7 @@ function AppShell() {
       case 'SCENARIO PLANNING':
         return <ScenarioPlanner onViewOutcome={handleViewOutcome} />;
       case 'SCENARIO OUTCOME':
-        return (
-          <ScenarioOutcome
-            savedScenarios={savedScenarios}
-            activeScenarioId={activeOutcomeScenarioId}
-          />
-        );
+        return <ScenarioOutcome activeScenarioId={activeOutcomeScenarioId} />;
       case 'SCENARIO COMPARISONS':
         return <ScenarioComparison savedScenarios={savedScenarios} />;
       case 'MODEL SUMMARY':

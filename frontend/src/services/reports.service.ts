@@ -314,6 +314,18 @@ export const reportsService = {
     api.get<ChannelBreakdownRow[]>(`/reports/channel-breakdown/${cycleId}`),
 
   /**
+   * Fetch distinct channel values from DATA_FACT for a given cycle.
+   * Used to populate the channel constraint list in the New Scenario modal.
+   * Only channels with uploaded raw data are returned.
+   *
+   * @param {string} cycleId - The cycle for which to fetch channels.
+   * @returns {Promise<string[]>} Sorted array of distinct channel names.
+   * @throws Will throw if the API request fails.
+   */
+  fetchChannelsForCycle: (cycleId: string): Promise<string[]> =>
+    api.get<string[]>(`/reports/channels/${cycleId}`),
+
+  /**
    * Fetch paginated DATA_FACT rows for a cycle.
    * Normalizes the API's snake_case pagination keys to camelCase.
    *

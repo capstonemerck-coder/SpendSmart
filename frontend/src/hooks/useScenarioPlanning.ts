@@ -5,9 +5,10 @@
  * cycle's model summary, saved scenarios, dashboard KPIs, proposed spend / slider
  * constraint state, scenario CRUD, and optimizer run/polling.
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { reportsService, type ModelSummaryOut } from '@/services/reports.service';
 import { scenarioService, type ScenarioOut } from '@/services/scenarios.service';
+import { useDataFactChannels } from '@/hooks/useDataFactChannels';
 import type { ChannelPlanningRow, SavedScenario, SaveScenarioParams, ConstraintPayload } from '@/utils/types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -19,12 +20,20 @@ const POLL_INTERVAL = 3000;
 export interface UseScenarioPlanningResult {
   channelRows: ChannelPlanningRow[];
   planningRows: ChannelPlanningRow[];
+  /** Constraint rows for the New Scenario modal, sourced from DATA_FACT channels.
+   *  Cross-references model summary for current spend/ROI. Filter to channel_id >= 0
+   *  before submitting constraints (channels without a model entry have id < 0). */
+  createModalRows: ChannelPlanningRow[];
   savedScenarios: SavedScenario[];
   dashboardKpis: { total_sales: number; total_spend: number; overall_roi: number };
   availableCategories: string[];
   channelIdMap: Record<string, number>;
   loadingChannels: boolean;
   loadingScenarios: boolean;
+  /** True while DATA_FACT channels are being fetched for the New Scenario modal. */
+  dataFactChannelsLoading: boolean;
+  /** Non-null if the DATA_FACT channel fetch failed. */
+  dataFactChannelsError: string | null;
   apiError: string | null;
   runningId: number | null;
   completedId: number | null;
@@ -141,6 +150,31 @@ export function useScenarioPlanning(cycleId: string | null): UseScenarioPlanning
   const availableCategories = [...new Set(channelRows.map((r) => r.category))].sort();
   const channelIdMap: Record<string, number> = Object.fromEntries(channelRows.map((r) => [r.channel_name, r.channel_id]));
 
+  // DATA_FACT channels for the New Scenario modal — authoritative list of channels
+  // that have actual uploaded raw data for this cycle.
+  const { channels: dataFactChannels, channelsLoading: dataFactChannelsLoading, channelsError: dataFactChannelsError } = useDataFactChannels(cycleId);
+
+  // Constraint rows for the create modal: DATA_FACT channels cross-referenced with model
+  // summary rows to provide current spend/ROI display values. Channels that have no model
+  // summary entry receive a negative sentinel ID and are filtered out before submission.
+  const createModalRows: ChannelPlanningRow[] = useMemo(() =>
+    dataFactChannels.map((channel, idx) => {
+      const modelRow = channelRows.find((r) => r.channel_name === channel);
+      const cid = modelRow?.channel_id ?? (-(idx + 1));
+      return {
+        channel_id: cid,
+        channel_name: channel,
+        category: modelRow?.category ?? channel,
+        current_spend: modelRow?.current_spend ?? 0,
+        proposed_spend: proposedSpend[cid] ?? (modelRow?.current_spend ?? 0),
+        current_roi: modelRow?.current_roi ?? 0,
+        min_spend_pct: sliderPcts[cid]?.min ?? 0,
+        max_spend_pct: sliderPcts[cid]?.max ?? 0,
+      };
+    }),
+    [dataFactChannels, channelRows, proposedSpend, sliderPcts],
+  );
+
   const handleSliderChange = (id: number, min: number, max: number) =>
     setSliderPcts((p) => ({ ...p, [id]: { min, max } }));
 
@@ -201,9 +235,11 @@ export function useScenarioPlanning(cycleId: string | null): UseScenarioPlanning
   };
 
   return {
-    channelRows, planningRows, savedScenarios, dashboardKpis,
+    channelRows, planningRows, createModalRows, savedScenarios, dashboardKpis,
     availableCategories, channelIdMap,
-    loadingChannels, loadingScenarios, apiError, runningId, completedId,
+    loadingChannels, loadingScenarios,
+    dataFactChannelsLoading, dataFactChannelsError,
+    apiError, runningId, completedId,
     clearApiError: () => setApiError(null),
     clearCompletedId: () => setCompletedId(null),
     handleSliderChange, handleReset, handleResetAll,

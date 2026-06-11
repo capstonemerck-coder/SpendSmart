@@ -354,6 +354,72 @@ export const ALL_SCREENS: ScreenPermission[] = [
   'SCENARIO COMPARISONS',
 ];
 
+// ── Scenario Outcome ─────────────────────────────────────────────────────────
+
+/** Sub-channel contribution row nested inside a ChannelGroupResult. */
+export interface SubChannelResult {
+  name: string;
+  optimized_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+}
+
+/** Channel-level result nested inside a CategoryGroupResult. */
+export interface ChannelGroupResult {
+  channel_id: number;
+  channel_name?: string;
+  category?: string;
+  depth: number;
+  optimized_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+  sub_channels: SubChannelResult[];
+}
+
+/** Category-level result group driving the 3-level contribution table. */
+export interface CategoryGroupResult {
+  channel_id: number;
+  channel_name?: string;
+  category?: string;
+  depth: number;
+  optimized_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+  channels: ChannelGroupResult[];
+}
+
+/**
+ * Normalized outcome response derived from ScenarioOutcomeOut.
+ * channel_results has an optional category field added by the hook.
+ * grouped_results is derived client-side from channel_results until the backend
+ * provides a real 3-level hierarchy.
+ */
+export interface ScenarioOutcomeData {
+  scenario_id: number;
+  scenario_name?: string;
+  scenario_type?: string;
+  total_sales?: number;
+  total_spend?: number;
+  impactable_sales?: number;
+  roi?: number;
+  mroi?: number;
+  channel_results: Array<{
+    channel_id: number;
+    channel_name?: string;
+    category?: string;
+    optimized_spend?: number;
+    impactable_sales?: number;
+    roi?: number;
+    mroi?: number;
+  }>;
+  grouped_results: CategoryGroupResult[];
+}
+
+// ── Auth & RBAC types ─────────────────────────────────────────────────────────
+
 /**
  * User record returned by GET /api/v1/users and GET /api/v1/auth/me.
  * Field names match the backend UserOut schema exactly.

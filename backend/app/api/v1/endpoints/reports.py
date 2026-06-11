@@ -7,6 +7,7 @@ GET /api/v1/reports/data-history/{cycle_id}    → DATA_FACT rows (paginated)
 GET /api/v1/reports/dashboard                  → Homepage KPI cards
 GET /api/v1/reports/metadata                   → All MetaData rows for cascading filters
 GET /api/v1/reports/data-fact-variables/{cycle_id} → Distinct variable values in DATA_FACT
+GET /api/v1/reports/channels/{cycle_id}            → Distinct channel names in DATA_FACT
 
 Data History endpoints:
 GET /api/v1/reports/cycles                         → Available cycle IDs
@@ -314,6 +315,40 @@ async def get_data_fact_variables(
     )
     rows = list(result.scalars().all())
     return sorted([r for r in rows if r])  # Filter out None, return sorted
+
+
+@router.get(
+    "/channels/{cycle_id}",
+    response_model=List[str],
+    summary="Distinct channel names from DATA_FACT for a cycle",
+    description=(
+        "Returns distinct, sorted, non-null channel values from DATA_FACT "
+        "for the given cycle. Used to populate the channel constraint list "
+        "in the New Scenario modal — only channels with uploaded raw data are returned."
+    ),
+)
+async def get_channels_for_cycle(
+    cycle_id: str,
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> List[str]:
+    """
+    Return distinct channel values from DATA_FACT for a given cycle.
+
+    Used to populate the channel constraint list in the New Scenario modal.
+    Only channels with uploaded raw data are returned.
+
+    Args:
+        cycle_id: The planning cycle identifier.
+
+    Returns:
+        Sorted list of distinct channel strings. Null channels are excluded.
+    """
+    result = await db.execute(
+        select(DataFact.channel).where(DataFact.cycle_id == cycle_id).distinct()
+    )
+    rows = list(result.scalars().all())
+    return sorted([r for r in rows if r])
 
 
 # ── Data History endpoints ────────────────────────────────────────────────────
